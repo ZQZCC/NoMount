@@ -2,7 +2,7 @@ name: build module
 
 on:
   push:
-    branches: [ master, dev ]
+    branches: my
     paths-ignore: 
       - '**.md'
       - '**.git*'
@@ -46,17 +46,13 @@ jobs:
             -fno-ident -Wno-invalid-noreturn -mllvm -enable-machine-outliner=always \
             -Wl,--entry=_start nm.c -o ../../bin/nm-arm64
 
-          zig cc -target arm-linux -Oz -static -nostdlib -ffreestanding -fno-unwind-tables -fno-ident -Wno-invalid-noreturn \
-            -ffunction-sections -fdata-sections -Wl,--gc-sections -Wl,--entry=_start nm.c -o ../../bin/nm-arm
-
           cd ../../bin
           wc -c nm-arm64
-          ../sstrip -z nm-arm64 nm-arm
+          ../sstrip -z nm-arm64
           wc -c nm-arm64
-
-          file nm-*
+          file nm-arm64
           mkdir -p ../module/bin
-          mv nm-* ../module/bin/
+          mv nm-arm64 ../module/bin/
 
       - name: compile lkmloader via zigcc
         run: |
@@ -66,12 +62,9 @@ jobs:
           zig cc -target aarch64-linux -Oz -static -Wl,--gc-sections,-z,norelro -fno-unwind-tables \
             -fno-ident -flto -fmerge-all-constants -fomit-frame-pointer src/lkmloader.c -o lkmloader-arm64
 
-          zig cc -target arm-linux -Oz -static -Wl,--gc-sections,-z,norelro -fno-unwind-tables \
-            -fno-ident -flto -fmerge-all-constants -fomit-frame-pointer src/lkmloader.c -o lkmloader-arm
-
-          ../sstrip -z lkmloader-*
-          file lkmloader-*
-          mv lkmloader-* ../module/bin/
+          ../sstrip -z lkmloader-arm64
+          file lkmloader-arm64
+          mv lkmloader-arm64 ../module/bin/
 
       - name: Process versioning and metadata
         run: |
@@ -82,10 +75,8 @@ jobs:
 
           sed -i "s/^versionCode=.*/versionCode=${COMMIT_COUNT}/" module/module.prop
           if [ "${{ github.ref }}" != "refs/heads/master" ]; then
-            sed -i "s/^version=\(.*\)/version=\1 \(${COMMIT_COUNT}-${SHORT_HASH}-dev\)/" module/module.prop
             echo "ARTIFACT_NAME=${NAME}-${BASE_VERSION}-dev-${SHORT_HASH}-${COMMIT_COUNT}" >> $GITHUB_ENV
           else
-            sed -i "s/^version=\(.*\)/version=\1 \(${COMMIT_COUNT}\)/" module/module.prop
             echo "ARTIFACT_NAME=${NAME}-${BASE_VERSION}-release-${SHORT_HASH}-${COMMIT_COUNT}" >> $GITHUB_ENV
           fi
 
@@ -95,7 +86,6 @@ jobs:
           WEBUI_BUILD="$RUNNER_TEMP/nomount-webui-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
           cp -a module "$MODULE_BUILD"
-          for f in "$MODULE_BUILD"/webroot/locales/*.json; do jq -c . "$f" > "$f.tmp" && mv "$f.tmp" "$f"; done
           mkdir -p "$WEBUI_BUILD"
           sed '/@import ".\/theme.css";/d' module/webroot/styles.css > "$WEBUI_BUILD/combined.css"
           cat module/webroot/theme.css >> "$WEBUI_BUILD/combined.css"
@@ -120,6 +110,16 @@ jobs:
           test -s "$MODULE_BUILD/webroot/index.html"
           grep -Fq '@import"/internal/insets.css"' "$MODULE_BUILD/webroot/styles.css"
           grep -Fq '@import"/internal/colors.css"' "$MODULE_BUILD/webroot/styles.css"
+          test -e "$MODULE_BUILD/bin/lkmloader-arm64"
+          test ! -e "$MODULE_BUILD/bin/lkmloader-arm"
+          test ! -e "$MODULE_BUILD/webroot/locales"
+          if grep -Eiq 'data-i18n|locales/zh\.json|\bi18n\b|cachedI18nNodes|loadTranslations' \
+              "$MODULE_BUILD/webroot/index.html" "$MODULE_BUILD/webroot/index.js" \
+              "$MODULE_BUILD/webroot/styles.css" ||
+             grep -Eiq 'translate[[:space:]]*\(' "$MODULE_BUILD/webroot/index.js"; then
+            echo "i18n residue found in release WebUI" >&2
+            exit 1
+          fi
 
       - name: Pack prepared module
         id: pack
