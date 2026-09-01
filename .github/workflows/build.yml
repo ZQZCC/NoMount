@@ -33,8 +33,7 @@ jobs:
 
       - name: grab sstrip from ELFkickers
         run: |
-          curl -L https://www.muppetlabs.com/~breadbox/pub/software/ELFkickers-3.2.tar.gz -o sstrip.tar.gz
-          tar xf sstrip.tar.gz
+          curl -fsSL https://www.muppetlabs.com/~breadbox/pub/software/ELFkickers-3.2.tar.gz | tar -xz
           make -C ELFkickers-3.2 sstrip
           cp ELFkickers-3.2/sstrip/sstrip .
           chmod +x ./sstrip
@@ -44,14 +43,16 @@ jobs:
           mkdir bin
           cd userspace/src
           zig cc -target aarch64-linux -Oz -mcmodel=tiny -static -nostdlib -ffreestanding -fno-unwind-tables \
-            -fno-ident -Wno-invalid-noreturn -Wl,--entry=_start nm.c -o ../../bin/nm-arm64
+            -fno-ident -Wno-invalid-noreturn -mllvm -enable-machine-outliner=always \
+            -Wl,--entry=_start nm.c -o ../../bin/nm-arm64
 
           zig cc -target arm-linux -Oz -static -nostdlib -ffreestanding -fno-unwind-tables -fno-ident -Wno-invalid-noreturn \
             -ffunction-sections -fdata-sections -Wl,--gc-sections -Wl,--entry=_start nm.c -o ../../bin/nm-arm
 
           cd ../../bin
-          ../sstrip -z nm-arm64
-          ../sstrip -z nm-arm
+          wc -c nm-arm64
+          ../sstrip -z nm-arm64 nm-arm
+          wc -c nm-arm64
 
           file nm-*
           mkdir -p ../module/bin
@@ -76,8 +77,8 @@ jobs:
         run: |
           SHORT_HASH=$(git rev-parse --short HEAD)
           COMMIT_COUNT=$(git rev-list --count HEAD)
-          NAME=$(sed -n 's/^name=//p' module/module.prop | tr -d '\r' | tr -d ' ')
-          BASE_VERSION=$(sed -n 's/^version=//p' module/module.prop | tr -d '\r' | tr -d ' ')
+          NAME=$(sed -n 's/^name=//p' module/module.prop | tr -d '\r ')
+          BASE_VERSION=$(sed -n 's/^version=//p' module/module.prop | tr -d '\r ')
 
           sed -i "s/^versionCode=.*/versionCode=${COMMIT_COUNT}/" module/module.prop
           if [ "${{ github.ref }}" != "refs/heads/master" ]; then
@@ -96,20 +97,29 @@ jobs:
           cp -a module "$MODULE_BUILD"
           for f in "$MODULE_BUILD"/webroot/locales/*.json; do jq -c . "$f" > "$f.tmp" && mv "$f.tmp" "$f"; done
           mkdir -p "$WEBUI_BUILD"
-          sed '/@import ".\/theme.css";/d' module/webroot/styles.css > "$WEBUI_BUILD/temp.css"
-          cat "$WEBUI_BUILD/temp.css" module/webroot/theme.css > "$WEBUI_BUILD/combined.css"
+          sed '/@import ".\/theme.css";/d' module/webroot/styles.css > "$WEBUI_BUILD/combined.css"
+          cat module/webroot/theme.css >> "$WEBUI_BUILD/combined.css"
 
-          curl -sL "https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-0.28.1.tgz" -o /tmp/esbuild.tgz
-          tar -xzf /tmp/esbuild.tgz -C /tmp && mv /tmp/package/bin/esbuild /tmp/esbuild && chmod +x /tmp/esbuild
-          /tmp/esbuild module/webroot/index.js --bundle --format=esm --minify --outfile="$WEBUI_BUILD/index.js"
+          curl -fsSL "https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-0.28.1.tgz" \
+            | tar -xz -C /tmp --strip-components=2 package/bin/esbuild
+          chmod +x /tmp/esbuild
+          /tmp/esbuild module/webroot/index.js --bundle --format=esm --minify --charset=utf8 --outfile="$WEBUI_BUILD/index.js"
           /tmp/esbuild "$WEBUI_BUILD/combined.css" --minify --outfile="$WEBUI_BUILD/styles.css"
-          tr '\n' ' ' < module/webroot/index.html | sed 's/  */ /g' | sed 's/> </></g' > "$WEBUI_BUILD/index.html"
+          tr '\n' ' ' < module/webroot/index.html | sed -e 's/  */ /g' -e 's/> </></g' > "$WEBUI_BUILD/index.html"
 
           install -m 0644 "$WEBUI_BUILD/index.js" "$MODULE_BUILD/webroot/index.js"
           install -m 0644 "$WEBUI_BUILD/styles.css" "$MODULE_BUILD/webroot/styles.css"
           install -m 0644 "$WEBUI_BUILD/index.html" "$MODULE_BUILD/webroot/index.html"
 
           rm "$MODULE_BUILD/webroot/theme.css"
+
+          node .github/scripts/optimize-webui.mjs "$MODULE_BUILD/webroot"
+
+          node --check "$MODULE_BUILD/webroot/index.js"
+          test -s "$MODULE_BUILD/webroot/styles.css"
+          test -s "$MODULE_BUILD/webroot/index.html"
+          grep -Fq '@import"/internal/insets.css"' "$MODULE_BUILD/webroot/styles.css"
+          grep -Fq '@import"/internal/colors.css"' "$MODULE_BUILD/webroot/styles.css"
 
       - name: Pack prepared module
         id: pack
