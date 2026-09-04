@@ -10,7 +10,7 @@ TARGET_PARTITIONS="system system_ext vendor odm product apex oem optics prism
                     mi_ext my_bigball my_carrier my_company my_engineering my_heytap
                     my_manifest my_preload my_product my_region my_reserve my_stock"
 PROP_FILE="$MODDIR/module.prop"
-BASE_DESC="A metamodule that replaces OverlayFS/MagicMount with VFS path redirection."
+BASE_DESC="基于 VFS 重定向的元模块"
 
 echo "=== NoMount Injection | Started: $(date) ===" >> "$LOG_FILE"
 
