@@ -55,6 +55,5 @@
   "status_version": "Версия: {{version}}",
   "add_exclusion": "Добавить исключение",
   "mode_lkm": "LKM",
-  "mode_builtin": "Built-in",
-  "module_version_label": "Module version"
+  "mode_builtin": "Built-in"
 }

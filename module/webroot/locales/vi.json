@@ -55,6 +55,5 @@
   "status_version": "Phiên bản: {{version}}",
   "add_exclusion": "Thêm vào danh sách đen",
   "mode_lkm": "LKM",
-  "mode_builtin": "Built-in",
-  "module_version_label": "Phiên bản mô-đun"
+  "mode_builtin": "Built-in"
 }
