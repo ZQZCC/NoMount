@@ -2,7 +2,7 @@ name: build module
 
 on:
   push:
-    branches: [ master, dev ]
+    branches: my
     paths-ignore: 
       - '**.md'
       - '**.git*'
@@ -46,21 +46,16 @@ jobs:
           mkdir bin
           cd userspace/src
           zig cc -target aarch64-linux -Oz -mcmodel=tiny -static -nostdlib -ffreestanding -fno-unwind-tables \
-            -fno-ident -Wno-invalid-noreturn -mllvm -enable-machine-outliner=always  -Wl,--entry=_start nm.c -o ../../bin/nm-arm64
-
-          zig cc -target arm-linux -Oz -static -nostdlib -ffreestanding -fno-unwind-tables -fno-ident -Wno-invalid-noreturn \
-            -ffunction-sections -fdata-sections -Wl,--gc-sections -Wl,--entry=_start nm.c -o ../../bin/nm-arm
-
-          zig cc -target x86_64-linux -Oz -static -nostdlib -ffreestanding -fno-unwind-tables -fno-ident -Wno-invalid-noreturn \
-            -Wl,--entry=_start nm.c -o ../../bin/nm-x86_64
+            -fno-ident -Wno-invalid-noreturn -mllvm -enable-machine-outliner=always \
+            -Wl,--entry=_start nm.c -o ../../bin/nm-arm64
 
           cd ../../bin
-          wc -c nm-*
-          ../sstrip -z nm-*
-          wc -c nm-*
-          file nm-*
+          wc -c nm-arm64
+          ../sstrip -z nm-arm64
+          wc -c nm-arm64
+          file nm-arm64
           mkdir -p ../module/bin
-          mv nm-* ../module/bin/
+          mv nm-arm64 ../module/bin/
 
       - name: compile lkmloader via zigcc
         run: |
@@ -71,16 +66,10 @@ jobs:
             -fno-ident -flto -fmerge-all-constants -fomit-frame-pointer -mllvm -enable-machine-outliner=always \
               src/lkmloader.c -o lkmloader-arm64
 
-          zig cc -target arm-linux -Oz -static -Wl,--gc-sections,-z,norelro -fno-unwind-tables \
-            -fno-ident -flto -fmerge-all-constants -fomit-frame-pointer src/lkmloader.c -o lkmloader-arm
-
-          zig cc -target x86_64-linux -Oz -static -Wl,--gc-sections,-z,norelro -fno-unwind-tables \
-            -fno-ident -flto -fmerge-all-constants -fomit-frame-pointer src/lkmloader.c -o lkmloader-x86_64
-
-          ../sstrip -z lkmloader-*
-          wc -c lkmloader-*
-          file lkmloader-*
-          mv lkmloader-* ../module/bin/
+          ../sstrip -z lkmloader-arm64
+          wc -c lkmloader-arm64
+          file lkmloader-arm64
+          mv lkmloader-arm64 ../module/bin/
 
       - name: Process versioning and metadata
         run: |
@@ -91,10 +80,8 @@ jobs:
 
           sed -i "s/^versionCode=.*/versionCode=${COMMIT_COUNT}/" module/module.prop
           if [ "${{ github.ref }}" != "refs/heads/master" ]; then
-            sed -i "s/^version=\(.*\)/version=\1 \(${COMMIT_COUNT}-${SHORT_HASH}-dev\)/" module/module.prop
-            echo "ARTIFACT_NAME=${NAME}-${BASE_VERSION}-dev-${SHORT_HASH}-${COMMIT_COUNT}" >> $GITHUB_ENV
+            echo "ARTIFACT_NAME=${NAME}-${BASE_VERSION}-my-${SHORT_HASH}-${COMMIT_COUNT}" >> $GITHUB_ENV
           else
-            sed -i "s/^version=\(.*\)/version=\1 \(${COMMIT_COUNT}\)/" module/module.prop
             echo "ARTIFACT_NAME=${NAME}-${BASE_VERSION}-release-${SHORT_HASH}-${COMMIT_COUNT}" >> $GITHUB_ENV
           fi
 
@@ -104,18 +91,36 @@ jobs:
           WEBUI_BUILD="$RUNNER_TEMP/nomount-webui-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
           cp -a module "$MODULE_BUILD"
-          for f in "$MODULE_BUILD"/webroot/locales/*.json; do jq -c . "$f" > "$f.tmp" && mv "$f.tmp" "$f"; done
           mkdir -p "$WEBUI_BUILD"
 
           curl -fsSL "https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-0.28.1.tgz" \
-            | tar -xz -C /tmp --strip-components=2 package/bin/esbuild && chmod +x /tmp/esbuild
+            | tar -xz -C /tmp --strip-components=2 package/bin/esbuild
+          chmod +x /tmp/esbuild
           /tmp/esbuild module/webroot/index.js --bundle --format=esm --minify --charset=utf8 --outfile="$WEBUI_BUILD/index.js"
           /tmp/esbuild module/webroot/styles.css --minify --outfile="$WEBUI_BUILD/styles.css"
-          tr '\n' ' ' < module/webroot/index.html | sed 's/  */ /g' | sed 's/> </></g' > "$WEBUI_BUILD/index.html"
+          tr '\n' ' ' < module/webroot/index.html | sed -e 's/  */ /g' -e 's/> </></g' > "$WEBUI_BUILD/index.html"
 
           install -m 0644 "$WEBUI_BUILD/index.js" "$MODULE_BUILD/webroot/index.js"
           install -m 0644 "$WEBUI_BUILD/styles.css" "$MODULE_BUILD/webroot/styles.css"
           install -m 0644 "$WEBUI_BUILD/index.html" "$MODULE_BUILD/webroot/index.html"
+
+          node .github/scripts/optimize-webui.mjs "$MODULE_BUILD/webroot"
+
+          node --check "$MODULE_BUILD/webroot/index.js"
+          test -s "$MODULE_BUILD/webroot/styles.css"
+          test -s "$MODULE_BUILD/webroot/index.html"
+          grep -Fq '@import"/internal/insets.css"' "$MODULE_BUILD/webroot/styles.css"
+          grep -Fq '@import"/internal/colors.css"' "$MODULE_BUILD/webroot/styles.css"
+          test -e "$MODULE_BUILD/bin/lkmloader-arm64"
+          test ! -e "$MODULE_BUILD/bin/lkmloader-arm"
+          test ! -e "$MODULE_BUILD/webroot/locales"
+          if grep -Eiq 'data-i18n|locales/zh\.json|\bi18n\b|cachedI18nNodes|loadTranslations' \
+              "$MODULE_BUILD/webroot/index.html" "$MODULE_BUILD/webroot/index.js" \
+              "$MODULE_BUILD/webroot/styles.css" ||
+             grep -Eiq 'translate[[:space:]]*\(' "$MODULE_BUILD/webroot/index.js"; then
+            echo "i18n residue found in release WebUI" >&2
+            exit 1
+          fi
 
       - name: Pack prepared module
         id: pack
@@ -133,17 +138,7 @@ jobs:
   build-module:
     needs: [build-lkm, prepare-module]
     runs-on: ubuntu-latest
-    env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-
     steps:
-      - name: Checkout repo
-        if: env.BOT_TOKEN != '' && env.CHAT_ID != ''
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-
       - name: Download prepared module
         uses: actions/download-artifact@v7
         with:
@@ -162,28 +157,6 @@ jobs:
           pattern: nomount-*
           path: ${{ runner.temp }}/nomount-module-${{ github.run_id }}-${{ github.run_attempt }}/lkm
           merge-multiple: true
-
-      - name: Upload to Telegram
-        if: env.BOT_TOKEN != '' && env.CHAT_ID != ''
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-          TOPIC_ID: ${{ secrets.TOPIC_ID }}
-          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
-          COMMIT_URL: ${{ github.event.head_commit.url }}
-          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          RUN_NUMBER: ${{ github.run_number }}
-        run: |
-          MODULE_BUILD="$RUNNER_TEMP/nomount-module-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          export ZIP_PATH="$RUNNER_TEMP/${{ needs.prepare-module.outputs.artifact-name }}.zip"
-
-          echo "Packing module for Telegram..."
-          cd "$MODULE_BUILD"
-          zip -qr9 "$ZIP_PATH" .
-
-          echo "Uploading to Telegram..."
-          cd "$GITHUB_WORKSPACE"
-          python .github/scripts/telegram_upload.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
