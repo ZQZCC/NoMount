@@ -2,7 +2,7 @@
 set -eu
 
 GKI_ROOT=$(pwd)
-REPO_URL="https://github.com/maxsteeel/nomount"
+REPO_URL="https://github.com/ZQZCC/NoMount"
 REPO_DIR="$GKI_ROOT/NoMount"
 
 display_usage() {
@@ -62,6 +62,7 @@ setup_nomount() {
     fi
 
     cd "$REPO_DIR"
+    git remote set-url origin "$REPO_URL"
 
     git reset --hard HEAD --quiet
     if [ -z "${1-}" ]; then

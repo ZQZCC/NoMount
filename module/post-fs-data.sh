@@ -6,7 +6,7 @@ NOMOUNT_DATA="/data/adb/nomount"
 LOG_FILE="$NOMOUNT_DATA/nomount.log"
 BOOT_SEMAPHORE="$NOMOUNT_DATA/.booting"
 PROP_FILE="$MODDIR/module.prop"
-BASE_DESC="A metamodule that replaces OverlayFS/MagicMount with VFS path redirection."
+BASE_DESC="基于 VFS 重定向的元模块"
 
 load_ko() {
     local root_cmd=""

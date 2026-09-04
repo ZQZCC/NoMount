@@ -28,133 +28,23 @@ function showToast(msg) {
     }
 }
 
-// i18n Engine
-const LOCALE_NAMES = {
-    en: 'English',
-    es: 'Español',
-    id: 'Bahasa Indonesia',
-    zh: '简体中文',
-    ru: 'Русский',
-    pl: 'Polski',
-    tr: 'Türkçe',
-    vi: 'Tiếng Việt',
-    bn: 'বাংলা',
-    ja: '日本語',
-    ar: 'العربية',
-    'ar-dz': 'العربية (الدارجة الجزائرية)'
-};
-const RTL_LOCALES = new Set(['ar', 'ar-dz']);
-
-const numberFormatterCache = Object.create(null);
-
-function formatNumber(value) {
-    let formatter = numberFormatterCache[activeLocale];
-
-    if (!formatter) {
-        formatter = new Intl.NumberFormat(activeLocale);
-        numberFormatterCache[activeLocale] = formatter;
-    }
-
-    return formatter.format(value);
-}
-
-let activeLocale = 'en', translations = {};
-
-const TPL_RE = /{{\s*([^\s}]+(?:[ \t]+[^\s}]+)*)\s*}}/g;
-const translate = (key, reps) => {
-    const str = translations[key] ?? key;
-
-    return reps
-        ? String(str).replace(TPL_RE, (_, n) => {
-            const value = reps[n];
-
-            if (typeof value === 'number') {
-                return formatNumber(value);
-            }
-
-            return value ?? '';
-        })
-        : str;
-};
-
-const translationsCache = {}; 
-let cachedI18nNodes = null;
-
-async function setAppLocale(locale, refreshView = true) {
-    activeLocale = locale in LOCALE_NAMES ? locale : 'en';
-
-    if (!translationsCache[activeLocale]) {
-        try {
-            const response = await fetch(`./locales/${activeLocale}.json`);
-            translationsCache[activeLocale] = response.ok ? await response.json() : {};
-        } catch { translationsCache[activeLocale] = {}; }
-    }
-
-    translations = translationsCache[activeLocale];
-    document.documentElement.lang = activeLocale;
-    document.documentElement.dir = RTL_LOCALES.has(activeLocale) ? 'rtl' : 'ltr';
-    localStorage.setItem('nm_locale', activeLocale);
-    if (!cachedI18nNodes) cachedI18nNodes = document.querySelectorAll('[data-i18n]');
-
-    cachedI18nNodes.forEach(el => {
-        const text = translate(el.dataset.i18n);
-        const targetAttr = el.dataset.i18nAttr;
-        
-        if (targetAttr) el.setAttribute(targetAttr, text);
-        else if ('placeholder' in el) el.placeholder = text;
-        else el.textContent = text;
-    });
-
-    renderLanguagePicker();
-    if (typeof renderThemePicker === 'function') renderThemePicker();
-    const activeViewId = document.querySelector('.view-content.active')?.id;
-
-    for (const id in viewLoadState) viewLoadState[id] = id === activeViewId;
-    if (refreshView && activeViewId && activeViewId !== 'view-options') refreshCurrentView();
-}
-
-function renderLanguagePicker() {
-    const wrapper = document.getElementById('lang-select-wrapper');
-    const valueDisplay = document.getElementById('lang-select-value');
-    const menu = document.getElementById('lang-select-menu');
-    if (!wrapper || !valueDisplay || !menu) return;
-
-    menu.replaceChildren();
-    for (const loc in LOCALE_NAMES) {
-        const optionEl = document.createElement('div');
-        optionEl.className = `custom-select-option ${loc === activeLocale ? 'selected' : ''}`;
-        optionEl.textContent = LOCALE_NAMES[loc];
-        if (loc === activeLocale) valueDisplay.textContent = LOCALE_NAMES[loc];
-        
-        optionEl.onclick = (e) => {
-            e.stopPropagation();
-            wrapper.classList.remove('open');
-            if (loc !== activeLocale) setTimeout(() => setAppLocale(loc), 0);
-        };
-        menu.appendChild(optionEl);
-    }
-
-    if (!wrapper.dataset.listenerAttached) {
-        document.getElementById('lang-select-trigger').onclick = (e) => { 
-            e.stopPropagation();
-            document.querySelectorAll('.custom-select-wrapper.open').forEach(w => {
-                if (w !== wrapper) w.classList.remove('open');
-            });
-            wrapper.classList.toggle('open'); 
-        };
-        document.addEventListener('click', () => wrapper.classList.remove('open'));
-        wrapper.dataset.listenerAttached = 'true';
-    }
-}
-
 // Constants & Helpers
 const MOD_DIR = "/data/adb/modules";
 const NM_DATA = "/data/adb/nomount";
 const NM_BIN = "/data/adb/modules/nomount/bin/nm";
 const RULE_PATHS = `${MOD_DIR}/nomount/rule-paths.sh`;
-const FILES = { disable: `${NM_DATA}/disable`, exclusions: `${NM_DATA}/.exclusion_list.json`, isolated: `${NM_DATA}/.block_isolated_uids`, theme: `${NM_DATA}/theme.json` };
+const FILES = { disable: `${NM_DATA}/disable`, exclusions: `${NM_DATA}/.exclusion_list.json`, isolated: `${NM_DATA}/.block_isolated_uids` };
 const APP_ICON_FALLBACK = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzgwODA4MCI+PHBhdGggZD0iTTEyIDJDNi40OCAyIDIgNi40OCAyIDEyczQuNDggMTAgMTAgMTAgMTAtNC40OCAxMC0xMFMxNy41MiAyIDEyIDJ6bTAgMThjLTQuNDEgMC04LTMuNTktOC04czMuNTktOCA4LTggOCAzLjU5IDggOC0zLjU5IDgtOCA4eiIvPjwvc3ZnPg==";
 const viewLoadState = { 'view-home': false, 'view-modules': false, 'view-exclusions': false, 'view-options': false };
+const numberFormatter = new Intl.NumberFormat('zh-CN');
+const formatNumber = value => numberFormatter.format(value);
+const STATUS_TEXT = {
+    status_active: '已激活',
+    status_loaded: '已加载',
+    status_disabled: '已禁用',
+    status_skipped: '已跳过',
+    status_inactive: '未激活'
+};
 
 const renderTextState = (el, cls, text) => { el.className = cls; el.textContent = text; };
 const renderEmptyState = (el, face, text) => el.innerHTML = `<div class="empty-list-placeholder empty-state"><div class="empty-face">${face}</div><div class="empty-text">${text}</div></div>`;
@@ -173,7 +63,6 @@ const ICON_PATHS = {
     extension: 'M352-120H200q-33 0-56.5-23.5T120-200v-152q48 0 84-30.5t36-77.5q0-47-36-77.5T120-568v-152q0-33 23.5-56.5T200-800h160q0-42 29-71t71-29q42 0 71 29t29 71h160q33 0 56.5 23.5T800-720v160q42 0 71 29t29 71q0 42-29 71t-71 29v160q0 33-23.5 56.5T720-120H568q0-50-31.5-85T460-240q-45 0-76.5 35T352-120Zm-152-80h85q24-66 77-93t98-27q45 0 98 27t77 93h85v-240h80q8 0 14-6t6-14q0-8-6-14t-14-6h-80v-240H480v-80q0-8-6-14t-14-6q-8 0-14 6t-6 14v80H200v88q54 20 87 67t33 105q0 57-33 104t-87 68v88Zm260-260Z',
     filter_list: 'M440-240q-17 0-28.5-11.5T400-280q0-17 11.5-28.5T440-320h80q17 0 28.5 11.5T560-280q0 17-11.5 28.5T520-240h-80ZM280-440q-17 0-28.5-11.5T240-480q0-17 11.5-28.5T280-520h400q17 0 28.5 11.5T720-480q0 17-11.5 28.5T680-440H280ZM160-640q-17 0-28.5-11.5T120-680q0-17 11.5-28.5T160-720h640q17 0 28.5 11.5T840-680q0 17-11.5 28.5T800-640H160Z',
     home: 'M240-200h120v-200q0-17 11.5-28.5T400-440h160q17 0 28.5 11.5T600-400v200h120v-360L480-740 240-560v360Zm-80 0v-360q0-19 8.5-36t23.5-28l240-180q21-16 48-16t48 16l240 180q15 11 23.5 28t8.5 36v360q0 33-23.5 56.5T720-120H560q-17 0-28.5-11.5T520-160v-200h-80v200q0 17-11.5 28.5T400-120H240q-33 0-56.5-23.5T160-200Zm320-270Z',
-    link_off: 'm770-302-60-62q40-11 65-42.5t25-73.5q0-50-35-85t-85-35H520v-80h160q83 0 141.5 58.5T880-480q0 57-29.5 105T770-302ZM634-440l-80-80h86v80h-6ZM792-56 56-792l56-56 736 736-56 56ZM440-280H280q-83 0-141.5-58.5T80-480q0-69 42-123t108-71l74 74h-24q-50 0-85 35t-35 85q0 50 35 85t85 35h160v80ZM320-440v-80h65l79 80H320Z',
     memory: 'M360-400v-160q0-17 11.5-28.5T400-600h160q17 0 28.5 11.5T600-560v160q0 17-11.5 28.5T560-360H400q-17 0-28.5-11.5T360-400Zm80-40h80v-80h-80v80Zm-80 280v-40h-80q-33 0-56.5-23.5T200-280v-80h-40q-17 0-28.5-11.5T120-400q0-17 11.5-28.5T160-440h40v-80h-40q-17 0-28.5-11.5T120-560q0-17 11.5-28.5T160-600h40v-80q0-33 23.5-56.5T280-760h80v-40q0-17 11.5-28.5T400-840q17 0 28.5 11.5T440-800v40h80v-40q0-17 11.5-28.5T560-840q17 0 28.5 11.5T600-800v40h80q33 0 56.5 23.5T760-680v80h40q17 0 28.5 11.5T840-560q0 17-11.5 28.5T800-520h-40v80h40q17 0 28.5 11.5T840-400q0 17-11.5 28.5T800-360h-40v80q0 33-23.5 56.5T680-200h-80v40q0 17-11.5 28.5T560-120q-17 0-28.5-11.5T520-160v-40h-80v40q0 17-11.5 28.5T400-120q-17 0-28.5-11.5T360-160Zm320-120v-400H280v400h400ZM480-480Z',
     refresh: 'M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-70q0-17 11.5-28.5T760-800q17 0 28.5 11.5T800-760v200q0 17-11.5 28.5T760-520H560q-17 0-28.5-11.5T520-560q0-17 11.5-28.5T560-600h128q-32-56-87.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q68 0 124.5-34.5T692-367q8-14 22.5-19.5t29.5-.5q16 5 23 21t-1 30q-41 80-117 128t-169 48Z',
     search: 'M380-320q-109 0-184.5-75.5T120-580q0-109 75.5-184.5T380-840q109 0 184.5 75.5T640-580q0 44-14 83t-38 69l224 224q11 11 11 28t-11 28q-11 11-28 11t-28-11L532-372q-30 24-69 38t-83 14Zm0-80q75 0 127.5-52.5T560-580q0-75-52.5-127.5T380-760q-75 0-127.5 52.5T200-580q0 75 52.5 127.5T380-400Z',
@@ -222,271 +111,21 @@ function applyIcons() {
     });
 }
 
-const THEME_NAMES = { system: 'System', light: 'Light', dark: 'Dark', amoled: 'AMOLED' };
-function renderThemePicker() {
-    const wrapper = document.getElementById('theme-select-wrapper');
-    const valueDisplay = document.getElementById('theme-select-value');
-    const menu = document.getElementById('theme-select-menu');
-    if (!wrapper || !valueDisplay || !menu) return;
+let cachedMetaTheme = null;
+function syncSystemBarTheme() {
+    if (!cachedMetaTheme) cachedMetaTheme = document.querySelector('meta[name="theme-color"]');
+    if (!cachedMetaTheme) return;
 
-    menu.replaceChildren();
-    for (const t in THEME_NAMES) {
-        const optionEl = document.createElement('div');
-        optionEl.className = `custom-select-option ${t === activeTheme ? 'selected' : ''}`;
-        const translatedName = translations[`theme_${t}`] || THEME_NAMES[t];
-        optionEl.textContent = translatedName;
-        if (t === activeTheme) valueDisplay.textContent = translatedName;
-
-        optionEl.onclick = (e) => {
-            e.stopPropagation();
-            wrapper.classList.remove('open');
-            if (t !== activeTheme) {
-                activeTheme = t;
-                localStorage.setItem('nm_theme', t);
-                applyAppearance();
-                renderThemePicker();
-                if (typeof syncThemeToDisk === 'function') syncThemeToDisk();
-            }
-        };
-        menu.appendChild(optionEl);
-    }
-
-    if (!wrapper.dataset.listenerAttached) {
-        document.getElementById('theme-select-trigger').onclick = (e) => { 
-            e.stopPropagation(); 
-            document.querySelectorAll('.custom-select-wrapper.open').forEach(w => {
-                if (w !== wrapper) w.classList.remove('open');
-            });
-            wrapper.classList.toggle('open'); 
-        };
-        document.addEventListener('click', () => wrapper.classList.remove('open'));
-        wrapper.dataset.listenerAttached = 'true';
-    }
-}
-
-let activeTheme = localStorage.getItem('nm_theme') || 'system';
-let isMaterial = localStorage.getItem('nm_material') !== 'false';
-let customColor = localStorage.getItem('nm_custom_color') || '#6750a4';
-
-function hexToHSL(hex) {
-    let r = parseInt(hex.slice(1, 3), 16) / 255;
-    let g = parseInt(hex.slice(3, 5), 16) / 255;
-    let b = parseInt(hex.slice(5, 7), 16) / 255;
-    let max = Math.max(r, g, b), min = Math.min(r, g, b);
-    let h, s, l = (max + min) / 2;
-    if (max === min) {
-        h = s = 0;
-    } else {
-        let d = max - min;
-        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-        switch (max) {
-            case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-            case g: h = (b - r) / d + 2; break;
-            case b: h = (r - g) / d + 4; break;
-        }
-        h /= 6;
-    }
-    return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
-}
-
-const _PALETTE_ROLES = {
-    light: {
-        primary:                ['primary', 40, 0.85],
-        onPrimary:              ['primary', 90, 0.40],
-        primaryContainer:       ['primary', 90, 0.55],
-        onPrimaryContainer:     ['primary', 10, 0.75],
-        secondaryContainer:     ['secondary', 35, 0.50],
-        onSecondaryContainer:   ['secondary', 90, 0.45],
-        surface:                ['neutral', 98, 0.40],
-        background:             ['neutral', 92, 0.80],
-        surfaceContainer:       ['neutral', 88, 0.40],
-        surfaceContainerHigh:   ['neutral', 90, 0.50],
-        surfaceContainerHighest:['neutral', 94, 0.60],
-        onSurface:              ['neutral', 10, 0.80],
-        onSurfaceVariant:       ['neutralVariant', 30, 0.16],
-        outline:                ['neutralVariant', 50, 0.20],
-        error:                  ['error', 40, 0.85],
-        onError:                ['error', 100, 0.00],
-        errorContainer:         ['error', 90, 0.55],
-        onErrorContainer:       ['error', 10, 0.75],
-    },
-    dark: {
-        primary:                ['primary', 80, 0.55],
-        onPrimary:              ['primary', 20, 0.65],
-        primaryContainer:       ['primary', 30, 0.65],
-        onPrimaryContainer:     ['primary', 80, 0.45],
-
-        secondaryContainer:     ['secondary', 24, 0.50],
-        onSecondaryContainer:   ['secondary', 80, 0.30],
-
-        surface:                ['neutral', 10, 0.60],
-        background:             ['neutral', 6, 0.90],
-        surfaceContainer:       ['neutral', 12, 0.60],
-        surfaceContainerHigh:   ['neutral', 17, 0.60],
-        surfaceContainerHighest:['neutral', 22, 0.60],
-        onSurface:              ['neutral', 80, 0.06],
-        onSurfaceVariant:       ['neutralVariant', 80, 0.16],
-        outline:                ['neutralVariant', 60, 0.20],
-
-        error:                  ['error', 75, 0.95],
-        onError:                ['error', 20, 0.65],
-        errorContainer:         ['error', 50, 0.95],
-        onErrorContainer:       ['error', 60, 0.45],
-    },
-};
-
-_PALETTE_ROLES.amoled = Object.assign({}, _PALETTE_ROLES.dark, {
-    surface:                ['neutral', 4, 0.02],
-    background:             ['neutral', 4, 0.02],
-    surfaceContainer:       ['neutral', 8, 0.08],
-    surfaceContainerHigh:   ['neutral', 12, 0.12],
-    surfaceContainerHighest:['neutral', 16, 0.16],
-});
-
-const _PALETTE_HUES = {
-    primary:        0,
-    secondary:     -4,
-    neutral:        8,
-    neutralVariant: 8,
-    error:          4,
-};
-
-const hslToHex = (h, s, l) => {
-    l /= 100;
-    const a = s * Math.min(l, 1 - l) / 100;
-    const f = n => {
-        const k = (n + h / 30) % 12;
-        const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
-        return Math.round(255 * color).toString(16).padStart(2, '0');
-    };
-    return `#${f(0)}${f(8)}${f(4)}`;
-};
-
-function _tone(h, s, tone) {
-    const t = tone / 100;
-    const bell = Math.pow(Math.sin(Math.PI * t), 0.9);
-    const sat = Math.min(1, s * bell);
-    return hslToHex(h * 360, sat * 100, tone);
-}
-
-function computePalette(seedHex, scheme) {
-    const { h: seedH, s: seedS } = hexToHSL(seedHex);
-    const seedHue = seedH / 360;
-    const seedSat = seedS / 100;
-    const roles = _PALETTE_ROLES[scheme] || _PALETTE_ROLES.light;
-
-    const out = {};
-    for (const [role, [palette, tone, chroma]] of Object.entries(roles)) {
-        const h = (palette === 'error') ? _PALETTE_HUES.error / 360 : (seedHue + _PALETTE_HUES[palette] / 360 + 1) % 1;
-        const s = (palette === 'error') ? chroma : seedSat * chroma;
-        out['--md-sys-color-' + role.replace(/[A-Z]/g, c => '-' + c.toLowerCase())] =
-            _tone(h, s, tone);
-    }
-    return out;
-}
-
-let _nmSeed = null, _nmMqDark = null;
-function getSeedColor() {
-    if (!isMaterial) return customColor;
-    if (_nmSeed) return _nmSeed;
-    const v = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim();
-    _nmSeed = /^#[0-9a-f]{6}$/i.test(v) ? v : '#6750a4';
-    return _nmSeed;
-}
-
-function resolveScheme() {
-    if (activeTheme === 'light') return 'light';
-    if (activeTheme === 'dark')  return 'dark';
-    if (activeTheme === 'amoled') return 'amoled';
-    // 'system'
-    return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-}
-
-function applyAppearance() {
-    const root = document.documentElement;
-    root.setAttribute('data-theme', activeTheme);
-    root.setAttribute('data-material', isMaterial);
-
-    const scheme = resolveScheme();
-    root.setAttribute('data-scheme', scheme);
-
-    const palette = computePalette(getSeedColor(), scheme);
-    for (const [name, value] of Object.entries(palette))
-        root.style.setProperty(name, value);
-
-    if (!isMaterial)
-        root.style.setProperty('--nm-custom-color', customColor);
-    else
-        root.style.removeProperty('--nm-custom-color');
-
-    if (!_nmMqDark) {
-        _nmMqDark = matchMedia('(prefers-color-scheme: dark)');
-        _nmMqDark.addEventListener('change', () => {
-            if (activeTheme === 'system') {
-                _nmSeed = null;
-                applyAppearance();
-            }
-        });
-    }
-}
-// Apply immediately to prevent flashes
-applyAppearance();
-
-let nmThemeDirty = false;
-async function syncThemeToDisk() {
-    nmThemeDirty = true;
-    const config = { theme: activeTheme, material: isMaterial, color: customColor };
-    const jsonStr = JSON.stringify(config);
-    const b64 = btoa(unescape(encodeURIComponent(jsonStr)));
-    await exec(`mkdir -p ${NM_DATA} && echo "${b64}" | base64 -d > ${FILES.theme}.tmp && mv -f ${FILES.theme}.tmp ${FILES.theme}`);
-}
-
-async function restoreThemeFromDisk() {
-    try {
-        const { stdout, errno } = await exec(`cat ${FILES.theme} 2>/dev/null`);
-        if (errno !== 0 || !stdout) return;
-
-        let config;
-        try { config = JSON.parse(stdout.trim()); } catch { return; }
-
-        if (nmThemeDirty) return;
-
-        const diskTheme = (config.theme && config.theme in THEME_NAMES) ? config.theme : activeTheme;
-        const diskMaterial = config.material !== undefined ? Boolean(config.material) : isMaterial;
-        const diskColor = (typeof config.color === 'string' && /^#[0-9a-f]{6}$/i.test(config.color)) ? config.color : customColor;
-
-        if (diskTheme === activeTheme && diskMaterial === isMaterial && diskColor === customColor) return;
-
-        activeTheme = diskTheme;
-        isMaterial = diskMaterial;
-        customColor = diskColor;
-        localStorage.setItem('nm_theme', activeTheme);
-        localStorage.setItem('nm_material', isMaterial);
-        localStorage.setItem('nm_custom_color', customColor);
-
-        applyAppearance();
-        if (document.getElementById('theme-select-menu')) renderThemePicker();
-
-        const swMat = document.querySelector('#setting-material input');
-        const customColCard = document.getElementById('custom-color-card');
-        const colorIndicator = document.getElementById('custom-color-indicator');
-        const matCard = swMat?.closest('.segment-card');
-
-        if (swMat) swMat.checked = isMaterial;
-        if (customColCard) customColCard.style.display = isMaterial ? 'none' : '';
-        if (colorIndicator) colorIndicator.style.backgroundColor = customColor;
-        if (matCard) {
-            matCard.style.borderEndStartRadius = isMaterial ? 'var(--nm-segment-outer-corner)' : '';
-            matCard.style.borderEndEndRadius = isMaterial ? 'var(--nm-segment-outer-corner)' : '';
-        }
-    } catch (e) {}
+    const cs = getComputedStyle(document.documentElement);
+    const surfaceColor = cs.getPropertyValue('--md-sys-color-background').trim() ||
+                         cs.getPropertyValue('--md-sys-color-surface').trim();
+    if (surfaceColor) cachedMetaTheme.setAttribute('content', surfaceColor);
 }
 
 const homeUI = {};
 function getHomeElements() {
     if (!homeUI.kernel) {
         homeUI.stats = document.getElementById('injection-stats');
-        homeUI.moduleVersion = document.getElementById('module-version');
         homeUI.kernel = document.getElementById('kernel-version');
         homeUI.device = document.getElementById('device-model');
         homeUI.android = document.getElementById('android-ver');
@@ -503,27 +142,22 @@ const UI = {};
 let currentActiveViewId = 'view-home';
 let currentActiveViewTitle = '';
 
-let nmHistory = { level: 0, dialog: null, depth: 0 };
+let nmHistory = { level: 0, depth: 0 };
 history.replaceState(nmHistory, '');
 
-const nmDialogClosers = { presets: null, advanced: null };
 function nmPush(state) {
-    nmHistory = { level: state.level, dialog: state.dialog ?? null, depth: nmHistory.depth + 1 };
+    nmHistory = { level: state.level, depth: nmHistory.depth + 1 };
     history.pushState(nmHistory, '');
 }
 function nmReplace(state) {
-    nmHistory = { level: state.level, dialog: state.dialog ?? null, depth: nmHistory.depth };
+    nmHistory = { level: state.level, depth: nmHistory.depth };
     history.replaceState(nmHistory, '');
 }
 
 window.addEventListener('popstate', (e) => {
     const prev = nmHistory;
-    const next = e.state || { level: 0, dialog: null, depth: 0 };
+    const next = e.state || { level: 0, depth: 0 };
 
-    if (prev.dialog === 'advancedColor' && next.dialog !== 'advancedColor')
-        nmDialogClosers.advanced?.();
-    if (prev.dialog === 'colorPresets' && next.dialog !== 'colorPresets')
-        nmDialogClosers.presets?.();
     if (prev.level === 3 && next.level < 3)
         closeUidModalFromHistory();
     if (prev.level === 2 && next.level < 2) {
@@ -587,7 +221,7 @@ function updateTopAppBar() {
         UI.title = document.getElementById('top-app-bar-title');
     }
 
-    if (!['view-modules', 'view-exclusions', 'view-options'].includes(currentActiveViewId)) {
+    if (!['view-modules', 'view-exclusions'].includes(currentActiveViewId)) {
         if (UI.title.textContent !== '') UI.title.textContent = '';
         UI.bar.style.setProperty('--top-app-bar-opacity', '0');
         UI.bar.style.setProperty('--top-app-title-opacity', '0');
@@ -651,7 +285,7 @@ async function loadHome() {
             activeModulesCount = Object.keys(modCounts).length;
         } catch (e) { console.error("Error parsing rules:", e); }
 
-        const unk = translate('unknown_value');
+        const unk = '未知';
         const raw = parts.slice(0, 6);
         const kVer = raw[0] || unk,
               model = raw[1] || unk,
@@ -664,14 +298,13 @@ async function loadHome() {
         const homeData = {
             kernelVer: kVer, deviceModel: model,
             androidInfo: `Android ${aRel} (API ${aSdk})`,
-            driverVersion: `${dVer}`,
-            moduleVersion: `${mVer}`,
+            versionFull: `${mVer} (${dVer})`,
             active: dVer !== unk,
             nmMode
         };
 
         requestAnimationFrame(() => {
-            applyHomeData(homeData, activeModulesCount === 1 ? translate('module_injected_count') : translate('modules_injected_count', { count: activeModulesCount }));
+            applyHomeData(homeData, activeModulesCount === 1 ? '1 个模块注入中' : `${formatNumber(activeModulesCount)} 个模块注入中`);
             localStorage.setItem('nm_home_cache', JSON.stringify(homeData));
         });
     } catch (e) { console.error("Delayed Home update error:", e); }
@@ -679,18 +312,16 @@ async function loadHome() {
 
 function applyHomeData(data, statsText) {
     const el = getHomeElements();
-    if (el.kernel) el.kernel.textContent = data.kernelVer || translate('unknown_value');
-    if (el.device) el.device.textContent = data.deviceModel || translate('unknown_value');
-    if (el.android) el.android.textContent = data.androidInfo || translate('unknown_value');
-    if (el.moduleVersion) el.moduleVersion.textContent = translate('status_version', {
-        version: (data.moduleVersion || translate('unknown_value')).replace(/^v(?=\d)/i, '')
-    });
-    if (el.statusLabel) el.statusLabel.textContent = translate('status_version', {
-        version: (data.driverVersion || translate('unknown_value')).replace(/^v(?=\d)/i, '')
-    });
+    if (el.kernel) el.kernel.textContent = data.kernelVer || '未知';
+    if (el.device) el.device.textContent = data.deviceModel || '未知';
+    if (el.android) el.android.textContent = data.androidInfo || '未知';
+    if (el.statusLabel) {
+        const version = (data.versionFull || '未知').replace(/^v(?=\d)/i, '');
+        el.statusLabel.textContent = `版本：${version}`;
+    }
     if (statsText && el.stats) el.stats.textContent = statsText;
 
-    if (el.statusTitle) el.statusTitle.textContent = translate(data.active ? 'status_active' : 'status_inactive');
+    if (el.statusTitle) el.statusTitle.textContent = data.active ? '已激活' : '未激活';
     [el.statusLabel, el.statusCard].forEach(e => {
         if (e) { e.classList.toggle('active', data.active); e.classList.toggle('inactive', !data.active); }
     });
@@ -700,7 +331,7 @@ function applyHomeData(data, statsText) {
     }
 
     if (el.modeBadge) {
-        el.modeBadge.textContent = data.nmMode === 'lkm' ? translate('mode_lkm') : data.nmMode === 'built-in' ? translate('mode_builtin') : '';
+        el.modeBadge.textContent = data.nmMode === 'lkm' ? 'LKM' : data.nmMode === 'built-in' ? 'Built-in' : '';
     }
 }
 
@@ -750,19 +381,8 @@ async function loadModules() {
                     <div class="module-header">
                         <div class="module-info">
                             <h3>${realName || modId}</h3>
-                            <div class="module-chips">
-                                <span class="status-chip md-chip status-${statusKey.replace('status_', '')}">
-                                    ${translate(statusKey)}
-                                </span>
-                                <span class="files-chip md-chip" style="${fileCount > 0 ? '' : 'display: none;'}">
-                                    <md-icon data-icon="syringe">
-                                        <svg viewBox="0 0 48 48" aria-hidden="true" style="width: 1.2em; height: 1.2em; fill: currentColor; transform: scaleX(-1);">
-                                            <path d="M45.4,10.3,37.7,2.6a2.1,2.1,0,0,0-2.9,0,2.1,2.1,0,0,0,0,2.8l2.5,2.5-3.4,3.4L28.5,5.8h0a2,2,0,1,0-2.8,2.9L9.9,24.4a6.3,6.3,0,0,0-1.7,5.2l1.1,6.3L4.6,40.6a1.9,1.9,0,0,0,0,2.8,1.9,1.9,0,0,0,2.8,0l4.7-4.7,6.3,1.1a6,6,0,0,0,5.2-1.7L39.4,22.3a2,2,0,1,0,2.9-2.7l-5.6-5.5,3.4-3.4,2.5,2.5a2,2,0,0,0,1.4.6A2.1,2.1,0,0,0,45.4,10.3Zm-24.6,25a2.3,2.3,0,0,1-1.8.5l-5.8-1-1-5.8a2.3,2.3,0,0,1,.5-1.8l2.6-2.5,3.2,3.2a2.1,2.1,0,0,0,2.9,0,1.9,1.9,0,0,0,0-2.8l-3.3-3.3,3.4-3.3,3.3,3.2a2,2,0,0,0,2.8-2.8l-3.3-3.3,4.2-4.1,8,8Z"/>
-                                        </svg>
-                                    </md-icon>
-                                    <span class="files-count-text">${fileCount > 0 ? translate('modules_injected_files', { count: fileCount }) : ''}</span>
-                                </span>
-                            </div>
+                            <p>状态: ${STATUS_TEXT[statusKey]}</p>
+                            <p class="file-count"><span>已注入: ${formatNumber(fileCount)} 个文件</span></p>
                         </div>
                         <label class="custom-switch" id="switch-${modId}">
                             <input type="checkbox" class="switch-input" aria-label="Toggle module" ${!hasDisable ? 'checked' : ''}>
@@ -774,7 +394,7 @@ async function loadModules() {
                     <div class="module-divider"></div>
                     <div class="module-extension">
                         <button class="btn-hot-action ${isLoaded ? 'unload' : ''}" id="btn-hot-${modId}">
-                            <span>${translate(isLoaded ? 'modules_hot_unload' : 'modules_hot_load')}</span>
+                            <span>${isLoaded ? '热卸载' : '热加载'}</span>
                         </button>
                     </div>
                 </div>
@@ -782,7 +402,7 @@ async function loadModules() {
         });
 
         if (renderId === currentRenderId) {
-            lines.length === 0 ? renderEmptyState(listContainer, '(._.)', translate('no_modules_found')) : listContainer.innerHTML = htmlArr.join('');
+            lines.length === 0 ? renderEmptyState(listContainer, '(._.)', '未找到需要挂载的模块') : listContainer.innerHTML = htmlArr.join('');
         }
     } catch (e) {
         renderTextState(listContainer, 'error-message', `Error: ${e.message}`);
@@ -876,11 +496,11 @@ async function loadExclusions() {
 
         requestAnimationFrame(() => {
             if (loadId !== exclusionsLoadId) return;
-            blockedUids.length === 0 ? renderEmptyState(listContainer, '(._.)', translate('no_exclusions_yet')) : listContainer.innerHTML = htmlArr.join('');
+            blockedUids.length === 0 ? renderEmptyState(listContainer, '(._.)', '尚无排除项') : listContainer.innerHTML = htmlArr.join('');
         });
     } catch (e) {
-        renderTextState(listContainer, 'error-message', translate('error_loading_exclusions'));
-        showToast(translate('error_loading_exclusions'));
+        renderTextState(listContainer, 'error-message', '加载排除项出错');
+        showToast('加载排除项出错');
     }
 }
 
@@ -1030,11 +650,7 @@ function openAppSelector() {
     searchInput.value = '';
     if (sysSwitch) sysSwitch.checked = showSystemApps;
 
-    document.getElementById('btn-close-modal').onclick = () => { 
-        closeAppSelector();
-    };
-
-    container.innerHTML = `<div class="loading-spinner">${translate('loading') || 'Loading apps...'}</div>`;
+    container.innerHTML = '<div class="loading-spinner">加载中...</div>';
     listObserver = new IntersectionObserver((entries) => { 
         if (entries[0].isIntersecting) renderNextAppBatch(); 
     }, { root: container, rootMargin: '200px' });
@@ -1047,7 +663,7 @@ function openAppSelector() {
             document.getElementById('btn-filter-toggle').onclick = () => document.getElementById('filter-menu').classList.toggle('active');
             if (sysSwitch) sysSwitch.onchange = (e) => { showSystemApps = e.target.checked; filterAndRender(searchInput.value); };
         } catch (e) { 
-            renderTextState(container, 'error-message', `${translate('load_failed') || 'Failed'}`); 
+            renderTextState(container, 'error-message', '加载应用程序出错');
         }
     }, 250);
 }
@@ -1072,7 +688,7 @@ function renderNextAppBatch() {
 
     if (batch.length === 0) {
         if (listObserver) listObserver.disconnect();
-        if (appListRenderIndex === 0) renderEmptyState(container, '(._.)', translate('no_apps_found'));
+        if (appListRenderIndex === 0) renderEmptyState(container, '(._.)', '未找到应用程序');
         return;
     }
 
@@ -1094,7 +710,7 @@ function renderNextAppBatch() {
 }
 
 async function removeExclusion(uid, name, domItem) {
-    showToast(translate('unblocking_name', { name }));
+    showToast(`正在解除排除 ${name}...`);
     try {
         const unblockResult = await exec(`${NM_BIN} uid del ${uid}`);
         if (unblockResult.errno !== 0) throw new Error(unblockResult.stderr || 'Failed to unblock UID');
@@ -1104,9 +720,9 @@ async function removeExclusion(uid, name, domItem) {
         domItem.remove();
         const listContainer = document.getElementById('exclusions-list');
         if (listContainer.children.length === 0)
-            renderEmptyState(listContainer, '(._.)', translate('no_exclusions_yet'));
+            renderEmptyState(listContainer, '(._.)', '尚无排除项');
     } catch {
-        showToast(translate('error_unblocking'));
+        showToast('解除排除出错');
         domItem.style.opacity = '1';
         domItem.style.pointerEvents = 'auto';
     }
@@ -1114,7 +730,7 @@ async function removeExclusion(uid, name, domItem) {
 
 async function addExclusion(uid, label, pkg) {
     const uidStr = String(uid).trim();
-    if (!uidStr) return showToast(translate('error_blocking'));
+    if (!uidStr) return showToast('排除出错');
 
     try {
         const currentData = await readExclusionsJson();
@@ -1126,265 +742,82 @@ async function addExclusion(uid, label, pkg) {
             if (persistResult.errno !== 0) throw new Error(persistResult.stderr || 'Failed to save exclusion metadata');
         }
 
-        if (alreadySaved) showToast(translate('blocked_already'));
-        else if (blockResult.errno !== 0) showToast(translate('blocked_saved'));
-        else showToast(translate('blocked', { name: label }));
-    } catch { showToast(translate('error_blocking')); }
+        if (alreadySaved) showToast('已排除');
+        else if (blockResult.errno !== 0) showToast('已保存；运行时排除失败');
+        else showToast(`已排除: ${label}`);
+    } catch { showToast('排除出错'); }
 
     await loadExclusions();
 }
 
 // Options
-let optionsInitialized = false;
 async function loadOptions() {
-    if (!optionsInitialized) initOptionsUI();
+    const swSafe = document.querySelector('#setting-safemode input'),
+          swIso = document.querySelector('#setting-isolated input'),
+          swIsoCard = document.getElementById('setting-isolated-card'),
+          btnClearRules = document.getElementById('btn-clear-rules-only'),
+          btnClearUids = document.getElementById('btn-clear-uids-only'),
+          btnClearAll = document.getElementById('btn-clear-all');
 
-    const swSafe = document.querySelector('#setting-safemode input');
-    const swIso = document.querySelector('#setting-isolated input');
-    const swIsoCard = document.getElementById('setting-isolated-card');
-
-    if (swSafe)
+    if (swSafe) {
         swSafe.checked = (await exec(`[ -f ${FILES.disable} ] && echo yes`)).stdout.includes('yes');
+        swSafe.onchange = e => exec(e.target.checked ? `touch ${FILES.disable}` : `rm ${FILES.disable}`);
+    }
 
     if (swIso && swIsoCard) {
-        const safeModeCard = document.getElementById('setting-safemode').closest('.segment-card');
         const isoCheck = await exec(`${NM_BIN} uid block_isolated`);
         const out = isoCheck.stdout.trim();
-
         if (isoCheck.errno === 0 && (out === '1' || out === '0')) {
             swIsoCard.style.display = '';
-            if (safeModeCard) {
-                safeModeCard.style.borderStartStartRadius = '';
-                safeModeCard.style.borderStartEndRadius = '';
-            }
             swIso.checked = (out === '1');
-        } else {
-            if (safeModeCard) {
-                safeModeCard.style.borderStartStartRadius = 'var(--nm-segment-outer-corner)';
-                safeModeCard.style.borderStartEndRadius = 'var(--nm-segment-outer-corner)';
-            }
-        }
-    }
-}
-
-function initOptionsUI() {
-    optionsInitialized = true;
-    renderThemePicker();
-
-    const swMat = document.querySelector('#setting-material input');
-    const customColCard = document.getElementById('custom-color-card');
-    const colorIndicator = document.getElementById('custom-color-indicator');
-    const dialogPresets = document.getElementById('dialog-color-presets');
-    const dialogAdv = document.getElementById('dialog-adv-color');
-
-    if (swMat && customColCard && colorIndicator) {
-        const matCard = swMat.closest('.segment-card');
-        const updateAppearanceCards = () => {
-            customColCard.style.display = isMaterial ? 'none' : ''; 
-            if (matCard) {
-                matCard.style.borderEndStartRadius = isMaterial ? 'var(--nm-segment-outer-corner)' : '';
-                matCard.style.borderEndEndRadius = isMaterial ? 'var(--nm-segment-outer-corner)' : '';
-            }
-        };
-
-        swMat.checked = isMaterial;
-        colorIndicator.style.backgroundColor = customColor;
-        updateAppearanceCards();
-
-        swMat.onchange = (e) => {
-            isMaterial = e.target.checked;
-            localStorage.setItem('nm_material', isMaterial);
-            updateAppearanceCards();
-            applyAppearance();
-            syncThemeToDisk();
-        };
-
-        let originalColor = customColor;
-        let isAdvOpen = false;
-
-        const renderPresets = () => {
-            const grid = document.getElementById('color-presets-grid');
-            grid.replaceChildren();
-            const PALETTE = ['#ba1a1a', '#e86d28', '#d6b007', '#4c6b1f', '#006874', '#0061a4', '#3f5aa6', '#9a25ae'];
-            PALETTE.forEach(c => {
-                const btn = document.createElement('div');
-                btn.className = `preset-swatch ${c === customColor ? 'selected' : ''}`;
-                btn.style.backgroundColor = c;
-                btn.onclick = () => {
-                    customColor = c;
-                    originalColor = c;
-                    localStorage.setItem('nm_custom_color', customColor);
-                    applyAppearance();
-                    renderPresets();
-                    colorIndicator.style.backgroundColor = customColor;
-                    syncThemeToDisk();
-                };
-                grid.appendChild(btn);
-            });
-        };
-
-        const initAdvancedPicker = () => {
-            const { h, s, l } = hexToHSL(customColor);
-            const hInp = document.getElementById('adv-slider-h'),
-                  sInp = document.getElementById('adv-slider-s'),
-                  lInp = document.getElementById('adv-slider-l');
-            const preview = document.getElementById('adv-color-preview');
-            const hexInp = document.getElementById('adv-hex-input');
-
-            hInp.value = h;
-            sInp.value = s;
-            lInp.value = l;
-
-            let isTypingHex = false;
-            const updateLive = () => {
-                const hex = hslToHex(hInp.value, sInp.value, lInp.value);
-                preview.style.backgroundColor = hex;
-                customColor = hex; 
-                applyAppearance();
-                if (!isTypingHex && hexInp)
-                    hexInp.value = hex.substring(1).toUpperCase();
+            swIso.onchange = async (e) => {
+                const isChecked = e.target.checked;
+                swIsoCard.dataset.busy = 'true';
+                await exec(`${NM_BIN} uid block_isolated ${isChecked ? 'on' : 'off'}`);
+                await exec(isChecked ? `touch ${FILES.isolated}` : `rm ${FILES.isolated}`);
+                delete swIsoCard.dataset.busy;
             };
-
-            hInp.oninput = updateLive;
-            sInp.oninput = updateLive;
-            lInp.oninput = updateLive;
-            
-            // Hex Input Logic
-            if (hexInp) {
-                hexInp.oninput = (e) => {
-                    isTypingHex = true;
-                    let val = e.target.value.replace(/[^0-9A-Fa-f]/g, '');
-                    let parsedHex = null;
-                    if (val.length === 6)
-                        parsedHex = '#' + val;
-                    else if (val.length === 3)
-                        parsedHex = '#' + val[0] + val[0] + val[1] + val[1] + val[2] + val[2];
-
-                    if (parsedHex) {
-                        const newHsl = hexToHSL(parsedHex);
-                        hInp.value = newHsl.h;
-                        sInp.value = newHsl.s;
-                        lInp.value = newHsl.l;
-                        preview.style.backgroundColor = parsedHex;
-                        customColor = parsedHex;
-                        applyAppearance();
-                    }
-                    isTypingHex = false;
-                };
-
-                hexInp.onblur = () => {
-                    let val = hexInp.value.replace(/[^0-9A-Fa-f]/g, '');
-                    if (val.length === 3)
-                        val = val[0] + val[0] + val[1] + val[1] + val[2] + val[2];
-                    if (val.length !== 6) {
-                        val = customColor.substring(1);
-                    }
-                    hexInp.value = val.toUpperCase();
-                };
-            }
-
-            updateLive();
-        };
-        customColCard.onclick = () => {
-            originalColor = customColor;
-            history.pushState({ dialog: 'colorPresets' }, '');
-            dialogPresets.classList.add('show');
-            renderPresets();
-        };
-
-
-        nmDialogClosers.presets = () => { dialogPresets.classList.remove('show'); };
-        nmDialogClosers.advanced = () => {
-            if (!isAdvOpen) return;
-            dialogAdv.classList.remove('show');
-            isAdvOpen = false;
-            customColor = originalColor;
-            applyAppearance();
-            renderPresets();
-        };
-
-        customColCard.onclick = () => {
-            originalColor = customColor;
-            nmPush({ level: 1, dialog: 'colorPresets' });
-            dialogPresets.classList.add('show');
-            renderPresets();
-        };
-
-        document.getElementById('btn-color-presets-close').onclick = () => history.back();
-        document.getElementById('btn-adv-color-open').onclick = () => {
-            isAdvOpen = true;
-            nmPush({ level: 1, dialog: 'advancedColor' });
-            dialogAdv.classList.add('show');
-            initAdvancedPicker();
-        };
-        document.getElementById('btn-adv-color-cancel').onclick = () => history.back();
-        document.getElementById('btn-adv-color-accept').onclick = () => {
-            originalColor = customColor;
-            localStorage.setItem('nm_custom_color', customColor);
-            colorIndicator.style.backgroundColor = customColor;
-            history.back();
-            syncThemeToDisk();
-        };
-    }
-
-    const swSafe = document.querySelector('#setting-safemode input');
-    const swIso = document.querySelector('#setting-isolated input');
-    const swIsoCard = document.getElementById('setting-isolated-card');
-    const btnClearRules = document.getElementById('btn-clear-rules-only');
-    const btnClearUids = document.getElementById('btn-clear-uids-only');
-    const btnClearAll = document.getElementById('btn-clear-all');
-
-    if (swSafe)
-        swSafe.onchange = e => exec(e.target.checked ? `touch ${FILES.disable}` : `rm ${FILES.disable}`);
-
-    if (swIso && swIsoCard) {
-        swIso.onchange = async (e) => {
-            const isChecked = e.target.checked;
-            swIsoCard.dataset.busy = 'true';
-            await exec(`${NM_BIN} uid block_isolated ${isChecked ? 'on' : 'off'}`);
-            await exec(isChecked ? `touch ${FILES.isolated}` : `rm ${FILES.isolated}`);
-            delete swIsoCard.dataset.busy;
-        };
+        }
     }
 
     if (btnClearRules) {
         btnClearRules.onclick = async () => {
-            showToast(translate('clear_rules_toast'));
+            showToast('正在清除所有规则...');
             try {
                 const clearResult = await exec(`${NM_BIN} rule clear`);
                 if (clearResult.errno !== 0) throw new Error(clearResult.stderr || 'Failed to clear runtime rules');
-                showToast(translate('clear_rules_done'));
+                showToast('所有规则已清除！');
                 loadModules();
-            } catch { showToast(translate('save_failed') || "Failed"); }
+            } catch { showToast('保存失败'); }
         };
     }
 
     if (btnClearUids) {
         btnClearUids.onclick = async () => {
-            showToast(translate('clear_uids_toast'));
+            showToast('正在清除所有 UID...');
             try {
                 const persistResult = await writeExclusionsJson([]); 
                 if (persistResult.errno !== 0) throw new Error(persistResult.stderr || 'Failed to clear exclusions cache');
                 const clearResult = await exec(`${NM_BIN} uid clear`);
                 if (clearResult.errno !== 0) throw new Error(clearResult.stderr || 'Failed to clear runtime UIDs');
-                showToast(translate('clear_uids_done'));
+                showToast('所有 UID 已清除！');
                 loadExclusions();
-            } catch { showToast(translate('save_failed') || "Failed"); }
+            } catch { showToast('保存失败'); }
         };
     }
 
     if (btnClearAll) {
         btnClearAll.onclick = async () => {
-            showToast(translate('clear_all_toast'));
+            showToast('正在清除所有规则和 UID...');
             try {
                 const persistResult = await writeExclusionsJson([]); 
                 if (persistResult.errno !== 0) throw new Error(persistResult.stderr || 'Failed to clear exclusions cache');
                 const clearResult = await exec(`${NM_BIN} clear all`);
                 if (clearResult.errno !== 0) throw new Error(clearResult.stderr || 'Failed to clear runtime rules');
-                showToast(translate('clear_all_done'));
+                showToast('所有规则和 UID 已清除！');
                 loadModules();
                 loadExclusions();
-            } catch { showToast(translate('save_failed')); }
+            } catch { showToast('保存失败'); }
         };
     }
 }
@@ -1435,7 +868,7 @@ function attachPullToRefresh(containerSelector, indicatorSelector, threshold, re
                 await refreshCallback(); 
                 await new Promise(resolve => setTimeout(resolve, 400)); 
             } catch { 
-                showToast(translate('refresh_failed')); 
+                showToast('刷新失败');
             } finally { 
                 resetIndicator(); 
             }
@@ -1503,29 +936,18 @@ function initDelegationAndAttach() {
         activeRules.forEach(r => { if (r?.real?.startsWith(`${MOD_DIR}/${modId}/`)) newFileCount++; });
         const nowLoaded = newFileCount > 0;
         const toggleChecked = card.querySelector('.switch-input').checked;
-        const statusKey = nowLoaded ? (toggleChecked ? 'status_loaded' : 'status_active') : (toggleChecked ? 'status_inactive' : 'status_disabled');
-
-        const filesChip = card.querySelector('.files-chip');
-        if (newFileCount > 0) {
-            filesChip.style.display = '';
-            card.querySelector('.files-count-text').textContent = translate('modules_injected_files', { count: newFileCount });
-        } else {
-            filesChip.style.display = 'none';
-        }
-
-        const statusChip = card.querySelector('.status-chip');
-        statusChip.textContent = translate(statusKey);
-        statusChip.className = `status-chip md-chip status-${statusKey.replace('status_', '')}`;
-
+        const statusKey = nowLoaded ? (toggleChecked ? 'status_active' : 'status_loaded') : (toggleChecked ? 'status_inactive' : 'status_disabled');
+        card.querySelector('.file-count span').textContent = `已注入: ${formatNumber(newFileCount)} 个文件`;
+        card.querySelector('.module-info p').textContent = `状态: ${STATUS_TEXT[statusKey]}`;
         const hotBtn = card.querySelector('.btn-hot-action');
         const btnSpan = hotBtn.querySelector('span');
 
         if (nowLoaded) {
             hotBtn.classList.add('unload');
-            btnSpan.textContent = translate('modules_hot_unload');
+            btnSpan.textContent = '热卸载';
         } else {
             hotBtn.classList.remove('unload');
-            btnSpan.textContent = translate('modules_hot_load');
+            btnSpan.textContent = '热加载';
         }
     };
 
@@ -1569,7 +991,7 @@ function initDelegationAndAttach() {
             const isLoaded = hotBtn.classList.contains('unload');
             const btnSpan = hotBtn.querySelector('span');
             const originalText = btnSpan.textContent;
-            btnSpan.textContent = translate('loading') || '...';
+            btnSpan.textContent = '加载中...';
 
             setTimeout(async () => {
                 try {
@@ -1689,7 +1111,7 @@ function initDelegationAndAttach() {
                     await writeExclusionsJson(currentData);
                     await exec(`${NM_BIN} uid add ${uidsBash.join(' ')}`);
                     showToast(`${appsToSave.size} apps added`);
-                } catch { showToast(translate('error_blocking') || 'Error'); }
+                } catch { showToast('排除出错'); }
                 await loadExclusions();
             }
         } else {
@@ -1698,7 +1120,7 @@ function initDelegationAndAttach() {
                 closeAppSelector();
                 await addExclusion(manualUid.trim(), `UID: ${manualUid.trim()}`, 'System/Manual');
             } else if (manualUid) {
-                showToast(translate('invalid_uid') || 'Invalid UID format');
+                showToast('无效的 UID');
             }
         }
     });
@@ -1724,7 +1146,7 @@ function initDelegationAndAttach() {
     });
 
     attachPullToRefresh('#app-list-container', '#app-modal-refresh-indicator', 70, async () => {
-        document.getElementById('app-list-container').innerHTML = `<div class="loading-spinner">${translate('loading') || 'Refreshing...'}</div>`;
+        document.getElementById('app-list-container').innerHTML = '<div class="loading-spinner">加载中...</div>';
         await ensureAppsCache(true);
         await filterAndRender(document.getElementById('app-search-input')?.value || '');
     });
@@ -1747,16 +1169,15 @@ function initScrollListener() {
 }
 
 // Init
-document.addEventListener('DOMContentLoaded', async () => {
-    await setAppLocale((localStorage.getItem('nm_locale') || navigator.language || 'en').split('-')[0], false);
+document.addEventListener('DOMContentLoaded', () => {
     applyIcons();
+    syncSystemBarTheme();
     initNavigation();
     initDelegationAndAttach();
     initScrollListener();
     updateTopAppBar();
     viewLoadState['view-home'] = true;
     loadHome();
-    restoreThemeFromDisk();
     document.body.classList.remove('loading');
     if ('requestIdleCallback' in window) {
         requestIdleCallback(() => ensureAppsCache(true));
