@@ -18,18 +18,18 @@ if ! bootloop_check; then
 fi
 
 if ! ensure_lkm_loaded; then
-    disable_module "❌ Kernel not patched or module failed to load"
+    disable_module "❌ ERROR: Kernel not patched or module failed to load"
     exit 1
 fi
 
 exec 6>"$NOMOUNT_DATA/.inject.lock"
 if ! _lock_fd 6 120; then
-    klogerr "inject lock timed out after 120s"
+    echo "[FATAL] inject lock timeout after 120s" >> "$LOG_FILE"
     exec 6>&-
     exit 1
 fi
 
-klog "Injection started"
+echo "=== NoMount Injection | Started: $(date) ===" >> "$LOG_FILE"
 
 for mod_path in "$MODULES_DIR"/*; do
     [ -d "$mod_path" ] || continue
@@ -37,31 +37,34 @@ for mod_path in "$MODULES_DIR"/*; do
     [ "$mod_name" = "nomount" ] && continue
 
     if [ -f "$mod_path/disable" ] || [ -f "$mod_path/remove" ] || [ -f "$mod_path/skip_mount" ]; then
-        klog "SKIPPED module $mod_name, it is disabled/removed/skipped"
+        echo "[SKIP] Module $mod_name is disabled/removed/skipped" >> "$LOG_FILE"
         continue
     fi
 
     for partition in $TARGET_PARTITIONS; do
         if [ -d "$mod_path/$partition" ]; then
             [ -d "/$partition" ] || [ -d "/system/$partition" ] || continue
-            klog "mounting module $mod_name (/$partition)"
+            echo "[INFO] Mounting module: $mod_name (/$partition)" >> "$LOG_FILE"
             find -L "$mod_path/$partition" \( -type d -o -type c -o -name ".replace" -o -name ".remove" \) \
                 -exec sh "$MODDIR/rule-paths.sh" path "$mod_path" {} + 2>/dev/null \
-                | add_rule_and_log --whiteout
+                | xargs -0 -r -n 200 "$LOADER" rule add --whiteout >> "$LOG_FILE" 2>&1
 
             find -L "$mod_path/$partition" \( -type d -o -name ".replace" \) \
                 -exec sh "$MODDIR/rule-paths.sh" opaque "$mod_path" {} + 2>/dev/null \
-                | add_rule_and_log --opaque
+                | xargs -0 -r -n 200 "$LOADER" rule add --opaque >> "$LOG_FILE" 2>&1
 
             find -L "$mod_path/$partition" \( -type f -o -type l \) ! -name ".replace" ! -name ".remove" \
                 -exec sh "$MODDIR/rule-paths.sh" pair "$mod_path" {} + 2>/dev/null \
-                | add_rule_and_log
+                | xargs -0 -r -n 200 "$LOADER" rule add >> "$LOG_FILE" 2>&1
         fi
     done
 done
 
-klog "Injection completed"
+echo "=== Injection Complete: $(date) ===" >> "$LOG_FILE"
 sed -i "s|^description=.*|description=$BASE_DESC|" "$PROP_FILE"
+
+printf '\nCurrent files injected:\n' >> "$LOG_FILE"
+"$LOADER" rule list >> "$LOG_FILE"
 
 exec 6>&-
 exit 0
