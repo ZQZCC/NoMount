@@ -27,7 +27,7 @@ body.loading { opacity: 0; visibility: hidden; }
 .nav-item, .segment-icon, .app-icon-img, .exclusion-app img,
 .setting-item img, md-icon, .pull-to-refresh-indicator, .btn-hot-action, .custom-tonal-btn,
 .custom-fab, .modal-header, md-icon-button, .nav-icon, .empty-state,
-.filter-option, .bottom-nav, .custom-select-trigger, .root_layout {
+.filter-option, .bottom-nav, .root_layout {
     display: flex; align-items: center; justify-content: center;
 }
 
@@ -286,33 +286,6 @@ md-icon svg { width: 1em; height: 1em; fill: currentColor; display: block; }
 
 .exclusion-app { display: flex; align-items: center; gap: var(--nm-gap-relaxed); min-width: 0; overflow: hidden; }
 .app-meta { align-items: flex-end; gap: 4px; flex: 0 0 auto; text-align: right; }
-
-.custom-select-wrapper { position: relative; width: min-content; word-break: keep-all; user-select: none; }
-.custom-select-trigger {
-    height: 52px; padding: 0 12px; gap: 4px; border: 1px solid currentColor;
-    border-radius: 12px; font-size: 16px; cursor: pointer; transition: all 150ms ease;
-}
-.dropdown-arrow { transition: transform 150ms ease; margin-right: -6px; }
-.custom-select-wrapper.open .custom-select-trigger {
-    border-color: var(--md-sys-color-primary);
-    box-shadow: inset 0 0 0 1px var(--md-sys-color-primary);
-}
-.custom-select-wrapper.open .dropdown-arrow { transform: rotate(180deg); color: var(--md-sys-color-primary); }
-.custom-select-menu {
-    position: absolute; top: calc(100% + 4px); right: 0;
-    background-color: var(--md-sys-color-surface-container); border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-    opacity: 0; visibility: hidden; transform: translate3d(0, -10px, 0);
-    transition: opacity 250ms, transform 250ms; z-index: 1000; overflow: hidden;
-}
-.custom-select-wrapper.open .custom-select-menu { opacity: 1; visibility: visible; transform: translate3d(0, 0, 0); }
-.custom-select-option { padding: 12px 16px; cursor: pointer; transition: background-color 100ms; }
-.custom-select-option:hover { background-color: var(--md-sys-color-surface-container-highest); }
-.custom-select-option.selected {
-    background-color: var(--md-sys-color-secondary-container);
-    color: var(--md-sys-color-on-secondary-container);
-}
-#lang-setting-card { position: relative; z-index: 1000; }
 
 .empty-state {
     flex: 1 1 auto; width: 100%; min-height: 46vh; gap: 14px; text-align: center;

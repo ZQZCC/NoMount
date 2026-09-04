@@ -20,116 +20,6 @@ function showToast(msg) {
     }
 }
 
-// i18n Engine
-const LOCALE_NAMES = {
-    en: 'English',
-    es: 'Español',
-    id: 'Bahasa Indonesia',
-    zh: '简体中文',
-    ru: 'Русский',
-    tr: 'Türkçe',
-    vi: 'Tiếng Việt',
-    bn: 'বাংলা',
-    ja: '日本語'
-};
-
-const numberFormatterCache = Object.create(null);
-
-function formatNumber(value) {
-    let formatter = numberFormatterCache[activeLocale];
-
-    if (!formatter) {
-        formatter = new Intl.NumberFormat(activeLocale);
-        numberFormatterCache[activeLocale] = formatter;
-    }
-
-    return formatter.format(value);
-}
-
-let activeLocale = 'en', translations = {};
-
-const TPL_RE = /{{\s*([^\s}]+(?:[ \t]+[^\s}]+)*)\s*}}/g;
-const translate = (key, reps) => {
-    const str = translations[key] ?? key;
-
-    return reps
-        ? String(str).replace(TPL_RE, (_, n) => {
-            const value = reps[n];
-
-            if (typeof value === 'number') {
-                return formatNumber(value);
-            }
-
-            return value ?? '';
-        })
-        : str;
-};
-
-const translationsCache = {}; 
-let cachedI18nNodes = null;
-
-async function setAppLocale(locale, refreshView = true) {
-    activeLocale = locale in LOCALE_NAMES ? locale : 'en';
-
-    if (!translationsCache[activeLocale]) {
-        try {
-            const response = await fetch(`./locales/${activeLocale}.json`);
-            translationsCache[activeLocale] = response.ok ? await response.json() : {};
-        } catch { translationsCache[activeLocale] = {}; }
-    }
-
-    translations = translationsCache[activeLocale];
-    document.documentElement.lang = activeLocale;
-    localStorage.setItem('nm_locale', activeLocale);
-    if (!cachedI18nNodes) cachedI18nNodes = document.querySelectorAll('[data-i18n]');
-
-    cachedI18nNodes.forEach(el => {
-        const text = translate(el.dataset.i18n);
-        const targetAttr = el.dataset.i18nAttr;
-        
-        if (targetAttr) el.setAttribute(targetAttr, text);
-        else if ('placeholder' in el) el.placeholder = text;
-        else el.textContent = text;
-    });
-
-    renderLanguagePicker();
-    const activeViewId = document.querySelector('.view-content.active')?.id;
-
-    for (const id in viewLoadState) viewLoadState[id] = id === activeViewId;
-    if (refreshView && activeViewId && activeViewId !== 'view-options') refreshCurrentView();
-}
-
-function renderLanguagePicker() {
-    const wrapper = document.getElementById('lang-select-wrapper');
-    const valueDisplay = document.getElementById('lang-select-value');
-    const menu = document.getElementById('lang-select-menu');
-    if (!wrapper || !valueDisplay || !menu) return;
-
-    menu.replaceChildren();
-    for (const loc in LOCALE_NAMES) {
-        const optionEl = document.createElement('div');
-        optionEl.className = `custom-select-option ${loc === activeLocale ? 'selected' : ''}`;
-        optionEl.textContent = LOCALE_NAMES[loc];
-        if (loc === activeLocale) valueDisplay.textContent = LOCALE_NAMES[loc];
-        
-        optionEl.onclick = (e) => {
-            e.stopPropagation();
-            wrapper.classList.remove('open');
-            if (loc !== activeLocale) setTimeout(() => setAppLocale(loc), 0);
-        };
-        menu.appendChild(optionEl);
-    }
-
-    if (!wrapper.dataset.listenerAttached) {
-        document.getElementById('lang-select-trigger').onclick = (e) => { 
-            e.stopPropagation(); 
-            wrapper.classList.toggle('open'); 
-        };
-        document.addEventListener('click', () => wrapper.classList.remove('open'));
-        wrapper.dataset.listenerAttached = 'true';
-    }
-}
-
 // Constants & Helpers
 const MOD_DIR = "/data/adb/modules";
 const NM_DATA = "/data/adb/nomount";
@@ -137,6 +27,15 @@ const NM_BIN = "/data/adb/modules/nomount/bin/nm";
 const FILES = { disable: `${NM_DATA}/disable`, exclusions: `${NM_DATA}/.exclusion_list.json` };
 const APP_ICON_FALLBACK = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzgwODA4MCI+PHBhdGggZD0iTTEyIDJDNi40OCAyIDIgNi40OCAyIDEyczQuNDggMTAgMTAgMTAgMTAtNC40OCAxMC0xMFMxNy41MiAyIDEyIDJ6bTAgMThjLTQuNDEgMC04LTMuNTktOC04czMuNTktOCA4LTggOCAzLjU5IDggOC0zLjU5IDgtOCA4eiIvPjwvc3ZnPg==";
 const viewLoadState = { 'view-home': false, 'view-modules': false, 'view-exclusions': false, 'view-options': false };
+const numberFormatter = new Intl.NumberFormat('zh-CN');
+const formatNumber = value => numberFormatter.format(value);
+const STATUS_TEXT = {
+    status_active: '已激活',
+    status_loaded: '已加载',
+    status_disabled: '已禁用',
+    status_skipped: '已跳过',
+    status_inactive: '未激活'
+};
 
 const renderTextState = (el, cls, text) => { el.className = cls; el.textContent = text; };
 const renderEmptyState = (el, face, text) => el.innerHTML = `<div class="empty-list-placeholder empty-state"><div class="empty-face">${face}</div><div class="empty-text">${text}</div></div>`;
@@ -155,7 +54,6 @@ const ICON_PATHS = {
     extension: 'M352-120H200q-33 0-56.5-23.5T120-200v-152q48 0 84-30.5t36-77.5q0-47-36-77.5T120-568v-152q0-33 23.5-56.5T200-800h160q0-42 29-71t71-29q42 0 71 29t29 71h160q33 0 56.5 23.5T800-720v160q42 0 71 29t29 71q0 42-29 71t-71 29v160q0 33-23.5 56.5T720-120H568q0-50-31.5-85T460-240q-45 0-76.5 35T352-120Zm-152-80h85q24-66 77-93t98-27q45 0 98 27t77 93h85v-240h80q8 0 14-6t6-14q0-8-6-14t-14-6h-80v-240H480v-80q0-8-6-14t-14-6q-8 0-14 6t-6 14v80H200v88q54 20 87 67t33 105q0 57-33 104t-87 68v88Zm260-260Z',
     filter_list: 'M440-240q-17 0-28.5-11.5T400-280q0-17 11.5-28.5T440-320h80q17 0 28.5 11.5T560-280q0 17-11.5 28.5T520-240h-80ZM280-440q-17 0-28.5-11.5T240-480q0-17 11.5-28.5T280-520h400q17 0 28.5 11.5T720-480q0 17-11.5 28.5T680-440H280ZM160-640q-17 0-28.5-11.5T120-680q0-17 11.5-28.5T160-720h640q17 0 28.5 11.5T840-680q0 17-11.5 28.5T800-640H160Z',
     home: 'M240-200h120v-200q0-17 11.5-28.5T400-440h160q17 0 28.5 11.5T600-400v200h120v-360L480-740 240-560v360Zm-80 0v-360q0-19 8.5-36t23.5-28l240-180q21-16 48-16t48 16l240 180q15 11 23.5 28t8.5 36v360q0 33-23.5 56.5T720-120H560q-17 0-28.5-11.5T520-160v-200h-80v200q0 17-11.5 28.5T400-120H240q-33 0-56.5-23.5T160-200Zm320-270Z',
-    link_off: 'm770-302-60-62q40-11 65-42.5t25-73.5q0-50-35-85t-85-35H520v-80h160q83 0 141.5 58.5T880-480q0 57-29.5 105T770-302ZM634-440l-80-80h86v80h-6ZM792-56 56-792l56-56 736 736-56 56ZM440-280H280q-83 0-141.5-58.5T80-480q0-69 42-123t108-71l74 74h-24q-50 0-85 35t-35 85q0 50 35 85t85 35h160v80ZM320-440v-80h65l79 80H320Z',
     memory: 'M360-400v-160q0-17 11.5-28.5T400-600h160q17 0 28.5 11.5T600-560v160q0 17-11.5 28.5T560-360H400q-17 0-28.5-11.5T360-400Zm80-40h80v-80h-80v80Zm-80 280v-40h-80q-33 0-56.5-23.5T200-280v-80h-40q-17 0-28.5-11.5T120-400q0-17 11.5-28.5T160-440h40v-80h-40q-17 0-28.5-11.5T120-560q0-17 11.5-28.5T160-600h40v-80q0-33 23.5-56.5T280-760h80v-40q0-17 11.5-28.5T400-840q17 0 28.5 11.5T440-800v40h80v-40q0-17 11.5-28.5T560-840q17 0 28.5 11.5T600-800v40h80q33 0 56.5 23.5T760-680v80h40q17 0 28.5 11.5T840-560q0 17-11.5 28.5T800-520h-40v80h40q17 0 28.5 11.5T840-400q0 17-11.5 28.5T800-360h-40v80q0 33-23.5 56.5T680-200h-80v40q0 17-11.5 28.5T560-120q-17 0-28.5-11.5T520-160v-40h-80v40q0 17-11.5 28.5T400-120q-17 0-28.5-11.5T360-160Zm320-120v-400H280v400h400ZM480-480Z',
     refresh: 'M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-70q0-17 11.5-28.5T760-800q17 0 28.5 11.5T800-760v200q0 17-11.5 28.5T760-520H560q-17 0-28.5-11.5T520-560q0-17 11.5-28.5T560-600h128q-32-56-87.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q68 0 124.5-34.5T692-367q8-14 22.5-19.5t29.5-.5q16 5 23 21t-1 30q-41 80-117 128t-169 48Z',
     search: 'M380-320q-109 0-184.5-75.5T120-580q0-109 75.5-184.5T380-840q109 0 184.5 75.5T640-580q0 44-14 83t-38 69l224 224q11 11 11 28t-11 28q-11 11-28 11t-28-11L532-372q-30 24-69 38t-83 14Zm0-80q75 0 127.5-52.5T560-580q0-75-52.5-127.5T380-760q-75 0-127.5 52.5T200-580q0 75 52.5 127.5T380-400Z',
@@ -219,7 +117,6 @@ const homeUI = {};
 function getHomeElements() {
     if (!homeUI.kernel) {
         homeUI.stats = document.getElementById('injection-stats');
-        homeUI.moduleVersion = document.getElementById('module-version');
         homeUI.kernel = document.getElementById('kernel-version');
         homeUI.device = document.getElementById('device-model');
         homeUI.android = document.getElementById('android-ver');
@@ -339,7 +236,7 @@ async function loadHome() {
             activeModulesCount = Object.keys(modCounts).length;
         } catch (e) { console.error("Error parsing rules:", e); }
 
-        const unk = translate('unknown_value');
+        const unk = '未知';
         const raw = parts.slice(0, 6);
         const kVer = raw[0] || unk,
               model = raw[1] || unk,
@@ -352,14 +249,13 @@ async function loadHome() {
         const homeData = {
             kernelVer: kVer, deviceModel: model,
             androidInfo: `Android ${aRel} (API ${aSdk})`,
-            driverVersion: `${dVer}`,
-            moduleVersion: `${mVer}`,
+            versionFull: `${mVer} (${dVer})`,
             active: dVer !== unk,
             nmMode
         };
 
         requestAnimationFrame(() => {
-            applyHomeData(homeData, activeModulesCount === 1 ? translate('module_injected_count') : translate('modules_injected_count', { count: activeModulesCount }));
+            applyHomeData(homeData, activeModulesCount === 1 ? '1 个模块注入中' : `${formatNumber(activeModulesCount)} 个模块注入中`);
             localStorage.setItem('nm_home_cache', JSON.stringify(homeData));
         });
     } catch (e) { console.error("Delayed Home update error:", e); }
@@ -367,18 +263,16 @@ async function loadHome() {
 
 function applyHomeData(data, statsText) {
     const el = getHomeElements();
-    if (el.kernel) el.kernel.textContent = data.kernelVer || translate('unknown_value');
-    if (el.device) el.device.textContent = data.deviceModel || translate('unknown_value');
-    if (el.android) el.android.textContent = data.androidInfo || translate('unknown_value');
-    if (el.moduleVersion) el.moduleVersion.textContent = translate('status_version', {
-        version: (data.moduleVersion || translate('unknown_value')).replace(/^v(?=\d)/i, '')
-    });
-    if (el.statusLabel) el.statusLabel.textContent = translate('status_version', {
-        version: (data.driverVersion || translate('unknown_value')).replace(/^v(?=\d)/i, '')
-    });
+    if (el.kernel) el.kernel.textContent = data.kernelVer || '未知';
+    if (el.device) el.device.textContent = data.deviceModel || '未知';
+    if (el.android) el.android.textContent = data.androidInfo || '未知';
+    if (el.statusLabel) {
+        const version = (data.versionFull || '未知').replace(/^v(?=\d)/i, '');
+        el.statusLabel.textContent = `版本：${version}`;
+    }
     if (statsText && el.stats) el.stats.textContent = statsText;
 
-    if (el.statusTitle) el.statusTitle.textContent = translate(data.active ? 'status_active' : 'status_inactive');
+    if (el.statusTitle) el.statusTitle.textContent = data.active ? '已激活' : '未激活';
     [el.statusLabel, el.statusCard].forEach(e => {
         if (e) { e.classList.toggle('active', data.active); e.classList.toggle('inactive', !data.active); }
     });
@@ -388,7 +282,7 @@ function applyHomeData(data, statsText) {
     }
 
     if (el.modeBadge) {
-        el.modeBadge.textContent = data.nmMode === 'lkm' ? translate('mode_lkm') : data.nmMode === 'built-in' ? translate('mode_builtin') : '';
+        el.modeBadge.textContent = data.nmMode === 'lkm' ? 'LKM' : data.nmMode === 'built-in' ? 'Built-in' : '';
     }
 }
 
@@ -438,8 +332,8 @@ async function loadModules() {
                     <div class="module-header">
                         <div class="module-info">
                             <h3>${realName || modId}</h3>
-                            <p>${translate('status_label')}: ${translate(statusKey)}</p>
-                            <p class="file-count"><span>${translate('modules_injected_files', { count: fileCount })}</span></p>
+                            <p>状态: ${STATUS_TEXT[statusKey]}</p>
+                            <p class="file-count"><span>已注入: ${formatNumber(fileCount)} 个文件</span></p>
                         </div>
                         <label class="custom-switch" id="switch-${modId}">
                             <input type="checkbox" class="switch-input" aria-label="Toggle module" ${!hasDisable ? 'checked' : ''}>
@@ -451,7 +345,7 @@ async function loadModules() {
                     <div class="module-divider"></div>
                     <div class="module-extension">
                         <button class="btn-hot-action ${isLoaded ? 'unload' : ''}" id="btn-hot-${modId}">
-                            <span>${translate(isLoaded ? 'modules_hot_unload' : 'modules_hot_load')}</span>
+                            <span>${isLoaded ? '热卸载' : '热加载'}</span>
                         </button>
                     </div>
                 </div>
@@ -459,7 +353,7 @@ async function loadModules() {
         });
 
         if (renderId === currentRenderId) {
-            lines.length === 0 ? renderEmptyState(listContainer, '(._.)', translate('no_modules_found')) : listContainer.innerHTML = htmlArr.join('');
+            lines.length === 0 ? renderEmptyState(listContainer, '(._.)', '未找到需要挂载的模块') : listContainer.innerHTML = htmlArr.join('');
         }
     } catch (e) {
         renderTextState(listContainer, 'error-message', `Error: ${e.message}`);
@@ -581,11 +475,11 @@ async function loadExclusions() {
 
         requestAnimationFrame(() => {
             if (loadId !== exclusionsLoadId) return;
-            blockedUids.length === 0 ? renderEmptyState(listContainer, '(._.)', translate('no_exclusions_yet')) : listContainer.innerHTML = htmlArr.join('');
+            blockedUids.length === 0 ? renderEmptyState(listContainer, '(._.)', '尚无排除项') : listContainer.innerHTML = htmlArr.join('');
         });
     } catch (e) {
-        renderTextState(listContainer, 'error-message', translate('error_loading_exclusions'));
-        showToast(translate('error_loading_exclusions'));
+        renderTextState(listContainer, 'error-message', '加载排除项出错');
+        showToast('加载排除项出错');
     }
 }
 
@@ -736,7 +630,7 @@ function openAppSelector() {
         closeAppSelector();
     };
 
-    container.innerHTML = `<div class="loading-spinner">${translate('loading') || 'Loading apps...'}</div>`;
+    container.innerHTML = '<div class="loading-spinner">加载中...</div>';
     listObserver = new IntersectionObserver((entries) => { 
         if (entries[0].isIntersecting) renderNextAppBatch(); 
     }, { root: container, rootMargin: '200px' });
@@ -749,7 +643,7 @@ function openAppSelector() {
             document.getElementById('btn-filter-toggle').onclick = () => document.getElementById('filter-menu').classList.toggle('active');
             if (sysSwitch) sysSwitch.onchange = (e) => { showSystemApps = e.target.checked; filterAndRender(searchInput.value); };
         } catch (e) { 
-            renderTextState(container, 'error-message', `${translate('load_failed') || 'Failed'}`); 
+            renderTextState(container, 'error-message', '加载应用程序出错');
         }
     }, 250);
 }
@@ -774,7 +668,7 @@ function renderNextAppBatch() {
 
     if (batch.length === 0) {
         if (listObserver) listObserver.disconnect();
-        if (appListRenderIndex === 0) renderEmptyState(container, '(._.)', translate('no_apps_found'));
+        if (appListRenderIndex === 0) renderEmptyState(container, '(._.)', '未找到应用程序');
         return;
     }
 
@@ -796,7 +690,7 @@ function renderNextAppBatch() {
 }
 
 async function removeExclusion(uid, name, domItem) {
-    showToast(translate('unblocking_name', { name }));
+    showToast(`正在解除排除 ${name}...`);
     try {
         const unblockResult = await exec(`${NM_BIN} uid del ${uid}`);
         if (unblockResult.errno !== 0) throw new Error(unblockResult.stderr || 'Failed to unblock UID');
@@ -806,9 +700,9 @@ async function removeExclusion(uid, name, domItem) {
         domItem.remove();
         const listContainer = document.getElementById('exclusions-list');
         if (listContainer.children.length === 0)
-            renderEmptyState(listContainer, '(._.)', translate('no_exclusions_yet'));
+            renderEmptyState(listContainer, '(._.)', '尚无排除项');
     } catch {
-        showToast(translate('error_unblocking'));
+        showToast('解除排除出错');
         domItem.style.opacity = '1';
         domItem.style.pointerEvents = 'auto';
     }
@@ -816,7 +710,7 @@ async function removeExclusion(uid, name, domItem) {
 
 async function addExclusion(uid, label, pkg) {
     const uidStr = String(uid).trim();
-    if (!uidStr) return showToast(translate('error_blocking'));
+    if (!uidStr) return showToast('排除出错');
 
     try {
         const currentData = await readExclusionsJson();
@@ -828,10 +722,10 @@ async function addExclusion(uid, label, pkg) {
             if (persistResult.errno !== 0) throw new Error(persistResult.stderr || 'Failed to save exclusion metadata');
         }
 
-        if (alreadySaved) showToast(translate('blocked_already'));
-        else if (blockResult.errno !== 0) showToast(translate('blocked_saved'));
-        else showToast(translate('blocked', { name: label }));
-    } catch { showToast(translate('error_blocking')); }
+        if (alreadySaved) showToast('已排除');
+        else if (blockResult.errno !== 0) showToast('已保存；运行时排除失败');
+        else showToast(`已排除: ${label}`);
+    } catch { showToast('排除出错'); }
 
     await loadExclusions();
 }
@@ -848,16 +742,16 @@ async function loadOptions() {
 
     if (btnClear) {
         btnClear.onclick = async () => {
-            showToast(translate('clear_rules_toast'));
+            showToast('正在清除所有规则...');
             try {
                 const persistResult = await writeExclusionsJson([]); 
                 if (persistResult.errno !== 0) throw new Error(persistResult.stderr || 'Failed to clear exclusions cache');
                 const clearResult = await exec(`${NM_BIN} clear all`);
                 if (clearResult.errno !== 0) throw new Error(clearResult.stderr || 'Failed to clear runtime rules');
-                showToast(translate('clear_rules_done'));
+                showToast('所有规则已清除！');
                 loadModules();
                 loadExclusions();
-            } catch { showToast(translate('save_failed')); }
+            } catch { showToast('保存失败'); }
         };
     }
 }
@@ -908,7 +802,7 @@ function attachPullToRefresh(containerSelector, indicatorSelector, threshold, re
                 await refreshCallback(); 
                 await new Promise(resolve => setTimeout(resolve, 400)); 
             } catch { 
-                showToast(translate('refresh_failed')); 
+                showToast('刷新失败');
             } finally { 
                 resetIndicator(); 
             }
@@ -944,17 +838,17 @@ function initDelegationAndAttach() {
         const nowLoaded = newFileCount > 0;
         const toggleChecked = card.querySelector('.switch-input').checked;
         const statusKey = nowLoaded ? (toggleChecked ? 'status_loaded' : 'status_active') : (toggleChecked ? 'status_inactive' : 'status_disabled');
-        card.querySelector('.file-count span').textContent = translate('modules_injected_files', { count: newFileCount });
-        card.querySelector('.module-info p').textContent = `${translate('status_label')}: ${translate(statusKey)}`;
+        card.querySelector('.file-count span').textContent = `已注入: ${formatNumber(newFileCount)} 个文件`;
+        card.querySelector('.module-info p').textContent = `状态: ${STATUS_TEXT[statusKey]}`;
         const hotBtn = card.querySelector('.btn-hot-action');
         const btnSpan = hotBtn.querySelector('span');
 
         if (nowLoaded) {
             hotBtn.classList.add('unload');
-            btnSpan.textContent = translate('modules_hot_unload');
+            btnSpan.textContent = '热卸载';
         } else {
             hotBtn.classList.remove('unload');
-            btnSpan.textContent = translate('modules_hot_load');
+            btnSpan.textContent = '热加载';
         }
     };
 
@@ -998,7 +892,7 @@ function initDelegationAndAttach() {
             const isLoaded = hotBtn.classList.contains('unload');
             const btnSpan = hotBtn.querySelector('span');
             const originalText = btnSpan.textContent;
-            btnSpan.textContent = translate('loading') || '...';
+            btnSpan.textContent = '加载中...';
 
             setTimeout(async () => {
                 try {
@@ -1118,7 +1012,7 @@ function initDelegationAndAttach() {
                     await writeExclusionsJson(currentData);
                     await exec(`${NM_BIN} uid add ${uidsBash.join(' ')}`);
                     showToast(`${appsToSave.size} apps added`);
-                } catch { showToast(translate('error_blocking') || 'Error'); }
+                } catch { showToast('排除出错'); }
                 await loadExclusions();
             }
         } else {
@@ -1147,7 +1041,7 @@ function initDelegationAndAttach() {
                 closeAppSelector();
                 await addExclusion(manualUid.trim(), `UID: ${manualUid.trim()}`, 'System/Manual');
             } else if (manualUid) {
-                showToast(translate('invalid_uid') || 'Invalid UID format');
+                showToast('无效的 UID');
             }
         }
     });
@@ -1171,7 +1065,7 @@ function initDelegationAndAttach() {
     });
 
     attachPullToRefresh('#app-list-container', '#app-modal-refresh-indicator', 70, async () => {
-        document.getElementById('app-list-container').innerHTML = `<div class="loading-spinner">${translate('loading') || 'Refreshing...'}</div>`;
+        document.getElementById('app-list-container').innerHTML = '<div class="loading-spinner">加载中...</div>';
         await ensureAppsCache(true);
         await filterAndRender(document.getElementById('app-search-input')?.value || '');
     });
@@ -1194,8 +1088,7 @@ function initScrollListener() {
 }
 
 // Init
-document.addEventListener('DOMContentLoaded', async () => {
-    await setAppLocale((localStorage.getItem('nm_locale') || navigator.language || 'en').split('-')[0], false);
+document.addEventListener('DOMContentLoaded', () => {
     applyIcons();
     syncSystemBarTheme();
     initNavigation();
