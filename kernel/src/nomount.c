@@ -9,15 +9,23 @@
 
 /*** Helpers ***/
 
-static __always_inline bool nomount_is_uid_blocked(uid_t uid)
+static __always_inline bool nomount_is_uid_blocked(uid_t target_uid)
 {
-    bool is_blocked;
-    if (!static_branch_unlikely(&nomount_active_uids)) return false;
+    struct nm_uid_array *arr;
+    bool blocked = false;
     rcu_read_lock();
-    is_blocked = (idr_find(&nomount_uid_idr, uid) != NULL);
+    if ((arr = rcu_dereference(nomount_uids))) {
+        for (int i = 0; i < arr->count; i++) {
+            if (arr->uids[i] == target_uid) {
+                blocked = true;
+                break;
+            }
+        }
+    }
     rcu_read_unlock();
-    return is_blocked;
+    return blocked;
 }
+
 
 static __always_inline struct nomount_rule *nomount_bsearch_child(struct nomount_child_array *arr, const char *name, size_t len, u32 hash, int *index)
 {
@@ -1356,10 +1364,12 @@ static void __nomount_clear_all(int clear_flags)
     HLIST_HEAD(r_victims);
 
     if (clear_flags & NM_CLEAR_UIDS) {
-        static_branch_disable(&nomount_active_uids);
+        struct nm_uid_array *old;
         synchronize_rcu();
-        idr_destroy(&nomount_uid_idr);
-        if (!(clear_flags & NM_CLEAR_EXIT)) idr_init(&nomount_uid_idr);
+        if ((old = rcu_dereference_protected(nomount_uids, lockdep_is_held(&nomount_rwsem)))) {
+            RCU_INIT_POINTER(nomount_uids, NULL);
+            kfree_rcu(old, rcu);
+        }
     }
     if (clear_flags & NM_CLEAR_RULES) {
         struct rb_node *node;
@@ -1447,18 +1457,13 @@ static int nm_process_payload(unsigned long user_addr)
 
         case NM_CMD_ADD_UID:
             down_write(&nomount_rwsem);
-            bool was_empty = idr_is_empty(&nomount_uid_idr);
-            payload->status = idr_find(&nomount_uid_idr, payload->target_uid) ? -EEXIST :
-                              (idr_alloc(&nomount_uid_idr, (void *)8, payload->target_uid, payload->target_uid + 1, GFP_KERNEL) >= 0) ?
-                              (was_empty ? static_branch_enable(&nomount_active_uids) : NULL, 0) : -ENOMEM;
+            payload->status = nm_uid_add(payload->target_uid);
             up_write(&nomount_rwsem);
             break;
 
         case NM_CMD_DEL_UID:
             down_write(&nomount_rwsem);
-            payload->status = !idr_find(&nomount_uid_idr, payload->target_uid) ? -ENOENT :
-                              (idr_remove(&nomount_uid_idr, payload->target_uid), 
-                               idr_is_empty(&nomount_uid_idr) ? static_branch_disable(&nomount_active_uids) : (void)0, 0);
+            payload->status = nm_uid_del(payload->target_uid);
             up_write(&nomount_rwsem);
             break;
 
@@ -1495,14 +1500,16 @@ static int nm_process_payload(unsigned long user_addr)
 
         case NM_CMD_GET_UIDS: {
             u32 *out = (u32 *)payload->buffer;
-            int count = 0;
-            if (static_branch_unlikely(&nomount_active_uids)) {
-                rcu_read_lock();
-                while (count < sizeof(payload->buffer) / sizeof(*out) && idr_get_next(&nomount_uid_idr, &payload->arg1))
-                    out[count++] = payload->arg1++;
-                rcu_read_unlock();
+            int count = 0, start_idx = payload->arg1;
+            struct nm_uid_array *arr;
+            rcu_read_lock();
+            if ((arr = rcu_dereference(nomount_uids))) {
+                while (start_idx < READ_ONCE(arr->count) && count < (sizeof(payload->buffer) / sizeof(*out)))
+                    out[count++] = arr->uids[start_idx++];
             }
+            rcu_read_unlock();            
             payload->data_size = count * sizeof(*out);
+            payload->arg1 = start_idx;
             break;
         }
     }
