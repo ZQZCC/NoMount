@@ -1373,7 +1373,6 @@ static void __nomount_clear_all(int clear_flags)
 
     if (clear_flags & NM_CLEAR_UIDS) {
         struct nm_uid_array *old;
-        synchronize_rcu();
         if ((old = rcu_dereference_protected(nomount_uids, lockdep_is_held(&nomount_rwsem)))) {
             RCU_INIT_POINTER(nomount_uids, NULL);
             kfree_rcu(old, rcu);
