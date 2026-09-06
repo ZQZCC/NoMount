@@ -755,7 +755,12 @@ static int nm_d_revalidate(struct dentry *dentry, unsigned int flags)
         has_rule = nomount_get_rule_info(parent_dir, name->name, name->len, hash, &rule_info, false);
     }
 
-    if (has_rule && !nomount_is_uid_blocked(current_uid().val)) {
+    if (nomount_is_uid_blocked(current_uid().val)) {
+        if (injected) goto drop_it;
+        goto orig_dops;
+    }
+
+    if (has_rule) {
         if (rule_info.flags & NM_FLAG_WHITEOUT) return !inode;
         if (injected) return 1;
         goto drop_it;
@@ -764,6 +769,7 @@ static int nm_d_revalidate(struct dentry *dentry, unsigned int flags)
     if (injected || (!inode && has_rule))
         goto drop_it;
 
+orig_dops:
     if ((orig_dops = nm_get_orig_dops(iop)) && orig_dops->d_revalidate) {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
         return orig_dops->d_revalidate(parent_inode, name, dentry, flags);
