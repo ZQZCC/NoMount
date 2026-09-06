@@ -15,14 +15,15 @@ jobs:
     with:
       build_all: true
 
-  build-module:
-    needs: build-lkm
+  prepare-module:
     runs-on: ubuntu-latest
+    outputs:
+      artifact-name: ${{ steps.pack.outputs.artifact-name }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Setup zig
@@ -73,13 +74,6 @@ jobs:
           file ko-loader-*
           mv ko-loader-* ../module/bin/
 
-      - name: Download all LKM artifacts
-        uses: actions/download-artifact@v7
-        with:
-          pattern: nomount-*
-          path: module/lkm
-          merge-multiple: true
-
       - name: Process versioning and metadata
         run: |
           SHORT_HASH=$(git rev-parse --short HEAD)
@@ -119,8 +113,44 @@ jobs:
 
           rm "$MODULE_BUILD/webroot/theme.css"
 
+      - name: Pack prepared module
+        id: pack
+        run: |
+          MODULE_BUILD="$RUNNER_TEMP/nomount-module-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          tar -cf "$RUNNER_TEMP/module-base.tar" -C "$MODULE_BUILD" .
+          echo "artifact-name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Upload prepared module
+        uses: actions/upload-artifact@v7
+        with:
+          name: module-base
+          path: ${{ runner.temp }}/module-base.tar
+
+  build-module:
+    needs: [build-lkm, prepare-module]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download prepared module
+        uses: actions/download-artifact@v7
+        with:
+          name: module-base
+          path: ${{ runner.temp }}
+
+      - name: Unpack prepared module
+        run: |
+          MODULE_BUILD="$RUNNER_TEMP/nomount-module-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$MODULE_BUILD"
+          tar -xf "$RUNNER_TEMP/module-base.tar" -C "$MODULE_BUILD"
+
+      - name: Download all LKM artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: nomount-*
+          path: ${{ runner.temp }}/nomount-module-${{ github.run_id }}-${{ github.run_attempt }}/lkm
+          merge-multiple: true
+
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.ARTIFACT_NAME }}
+          name: ${{ needs.prepare-module.outputs.artifact-name }}
           path: ${{ runner.temp }}/nomount-module-${{ github.run_id }}-${{ github.run_attempt }}/

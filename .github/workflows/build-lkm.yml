@@ -89,7 +89,7 @@ jobs:
         kmi: ${{ fromJSON(needs.select-kmis.outputs.kmi) }}
 
     container:
-      image: ghcr.io/ylarod/ddk:${{ matrix.kmi }}
+      image: ghcr.io/ylarod/ddk-min:${{ matrix.kmi }}
 
     env:
       MODULE_DIR: ${{ github.workspace }}/build/nomount
