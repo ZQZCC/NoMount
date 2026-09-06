@@ -121,8 +121,6 @@ struct nm_payload {
 struct nm_workspace {
     struct nm_payload payload;
     char cwd[PATH_MAX];
-    char virtual_path[PATH_MAX];
-    char real_path[PATH_MAX];
 } __attribute__((aligned(4096)));
 
 _Static_assert(sizeof(struct nm_payload) == 4096, "payload must occupy one page");
@@ -142,19 +140,6 @@ struct nm_del_hdr {
 
 /* --- UTILS --- */
 #define noinline __attribute__((noinline))
-#if defined(__x86_64__)
-static inline void *memcpy(void *dst, const void *src, unsigned long n) {
-    void *ret = dst;
-    __asm__ __volatile__("rep movsb" : "+D"(dst), "+S"(src), "+c"(n) : : "memory");
-    return ret;
-}
-#else
-static inline void *memcpy(char *dst, const char *src, int len) {
-    for (int i = 0; i < len; i++) dst[i] = src[i];
-    return dst;
-}
-#endif
-
 static noinline int strcmp(const char *s1, const char *s2) {
     while (*s1 && (*s1 == *s2)) { s1++; s2++; }
     return *(unsigned char *)s1 - *(unsigned char *)s2;
@@ -178,6 +163,23 @@ static noinline void print_uint(unsigned int n) {
 }
 
 /* path resolution */
+static noinline int resolved_path_length(const char *cwd, const char *rel) {
+    int length = 0;
+    if (cwd && *rel != '/') {
+        while (*cwd++) {
+            if (length == PATH_MAX) return -1;
+            length++;
+        }
+        if (length == PATH_MAX) return -1;
+        length++;
+    }
+    while (*rel++) {
+        if (length == PATH_MAX) return -1;
+        length++;
+    }
+    return length;
+}
+
 static noinline char* resolve_path(char *p, unsigned long capacity, const char *cwd, const char *rel) {
     char *end = p + capacity;
     if (cwd && *rel != '/') {

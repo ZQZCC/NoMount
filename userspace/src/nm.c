@@ -86,18 +86,14 @@ void c_main(long *sp) {
             char *cursor = payload->buffer;
 
             for (int i = 0; i + step - 1 < p_count; i += step) {
-                char *v_resolved = workspace.virtual_path;
-                char *v_end = resolve_path(v_resolved, sizeof(workspace.virtual_path), cwd, argv[i]);
-                if (!v_end) { exit_code = 3; continue; }
-                int v_len = v_end - v_resolved;
+                int v_len = resolved_path_length(cwd, argv[i]);
+                if (v_len < 0) { exit_code = 3; continue; }
                 if (!v_len) { exit_code = 3; continue; }
 
                 int r_len = 0;
-                char *r_resolved = workspace.real_path;
                 if (action == ACTION_RULE_ADD && !is_whiteout) {
-                    char *r_end = resolve_path(r_resolved, sizeof(workspace.real_path), cwd, argv[i+1]);
-                    if (!r_end) { exit_code = 3; continue; }
-                    r_len = r_end - r_resolved;
+                    r_len = resolved_path_length(cwd, argv[i+1]);
+                    if (r_len < 0) { exit_code = 3; continue; }
                     if (!r_len) { exit_code = 3; continue; }
                 }
 
@@ -116,15 +112,13 @@ void c_main(long *sp) {
                     h->flags = (is_whiteout) ? 4 : 0; h->uid = target_uid;
                     h->v_len = v_len; h->r_len = r_len;
 
-                    memcpy(cursor + sizeof(*h), v_resolved, v_len);
-                    if (r_len > 0) memcpy(cursor + sizeof(*h) + v_len, r_resolved, r_len);
-                    cursor += sizeof(*h) + v_len + r_len;
+                    cursor = resolve_path(cursor + sizeof(*h), v_len, cwd, argv[i]);
+                    if (r_len > 0) cursor = resolve_path(cursor, r_len, cwd, argv[i+1]);
                 } else {
                     struct nm_del_hdr *h = (void *)cursor;
                     h->uid = target_uid; h->v_len = v_len;
 
-                    memcpy(cursor + sizeof(*h), v_resolved, v_len);
-                    cursor += sizeof(*h) + v_len;
+                    cursor = resolve_path(cursor + sizeof(*h), v_len, cwd, argv[i]);
                 }
             }
 
