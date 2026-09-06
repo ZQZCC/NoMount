@@ -14,13 +14,13 @@ BASE_DESC="A metamodule that replaces OverlayFS/MagicMount with VFS path redirec
 
 load_ko() {
     if command -v ksud >/dev/null 2>&1 && ksud -h 2>&1 | grep -qE '(^|[[:space:]])insmod([[:space:]]|$)'; then
-        if ksud insmod "$1" && "$LOADER" version >/dev/null 2>&1; then return 0; fi
-        echo "[WARN] ksud insmod failed; falling back to KoLoader." >> "$LOG_FILE"
+        if ksud insmod "$1" >> "$LOG_FILE" && "$LOADER" version >/dev/null 2>&1; then return 0; fi
+        echo "[WARN] ksud insmod failed; falling back to lkmloader." >> "$LOG_FILE"
         rmmod nomount 2>/dev/null
     fi
 
-    if ! { "$MODDIR/loader" "$1" >/dev/null 2>&1 && "$LOADER" version >/dev/null 2>&1; }; then
-        echo "[FATAL] KoLoader failed; LKM hasn't been loaded." >> "$LOG_FILE"
+    if ! { "$MODDIR/lkm/lkmloader" "$1" >> "$LOG_FILE" 2>&1 && "$LOADER" version >/dev/null 2>&1; }; then
+        echo "[FATAL] lkmloader failed; LKM hasn't been loaded." >> "$LOG_FILE"
         return 1
     fi
 

@@ -34,22 +34,22 @@ fi
 USE_KSUD=false
 if command -v ksud >/dev/null 2>&1 && ksud -h 2>&1 | grep -qE '(^|[[:space:]])insmod([[:space:]]|$)'; then
   USE_KSUD=true
-  ui_print "- KernelSU ksud insmod detected; KoLoader will remain as fallback."
+  ui_print "- KernelSU ksud insmod detected; lkmloader will remain as fallback."
 fi
 
-mv "$MODPATH/bin/ko-loader-$ARCH" "$MODPATH/loader"
-set_perm "$MODPATH/loader" 0 0 0755
+mv "$MODPATH/bin/lkmloader-$ARCH" "$MODPATH/lkm/lkmloader"
+set_perm "$MODPATH/lkm/lkmloader" 0 0 0755
 rm -rf "$MODPATH"/bin/nm-* "$MODPATH"/bin/ko-loader-*
 
 load_ko() {
   if [ "$USE_KSUD" = true ]; then
     if ksud insmod "$1" && "$MODPATH/bin/nm" version >/dev/null 2>&1; then return 0; fi
-    ui_print "  [!] ksud insmod failed; falling back to KoLoader."
+    ui_print "  [!] ksud insmod failed; falling back to lkmloader."
     rmmod nomount 2>/dev/null
     USE_KSUD=false
   fi
 
-  if ! { "$MODPATH/loader" "$1" >/dev/null 2>&1 && "$MODPATH/bin/nm" version >/dev/null 2>&1; }; then
+  if ! { "$MODPATH/lkm/lkmloader" "$1" 2>&1 && "$MODPATH/bin/nm" version >/dev/null 2>&1; }; then
     return 1
   fi
 
@@ -132,7 +132,7 @@ fi
 
 if [ "$NOMOUNT_LOADED" = true ]; then
   if [ "$USE_KSUD" = true ] || [ "$IS_BUILTIN" = true ]; then
-    rm -f "$MODPATH/loader"
+    rm -f "$MODPATH/lkm/lkmloader" || true
   fi
   ui_print "  [OK] System is ready for injection."
   if [ "$OLD_LKM_UNLOADED" = true ] || [ "$RESTORED_OLD_KO" = true ]; then
