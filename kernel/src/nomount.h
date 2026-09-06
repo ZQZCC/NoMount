@@ -110,14 +110,8 @@ struct nomount_dir_node {
 };
 
 struct nomount_rule {
-    union {
-        struct rb_node rb_node;
-        struct hlist_node vpath_node;
-    };
-    union {
-        struct path r_path;
-        struct nomount_dir_node *this_dir;
-    };
+    struct path r_path;
+    struct nomount_dir_node *this_dir;
     unsigned long v_ino;
     u32 v_hash;
     unsigned int target_uid;
@@ -125,17 +119,20 @@ struct nomount_rule {
     u16 r_len;
     u16 child_len;
     u16 flags;
+
     struct nomount_dir_node *parent_dir;
+    union {
+        struct rb_node rb_node;
+        struct hlist_node vpath_node;
+    };
     char paths[];
 };
 
 struct nm_rule_info {
-    union {
-        struct path r_path;
-        struct nomount_dir_node *this_dir;
-    };
-    unsigned long v_ino;
     u16 flags;
+    unsigned long v_ino;
+    struct path r_path;
+    struct nomount_dir_node *this_dir;
 };
 
 struct nm_uid_array {
