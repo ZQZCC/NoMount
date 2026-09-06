@@ -154,23 +154,10 @@ static NM_ACTOR_RET nomount_actor_proxy(struct dir_context *ctx, const char *nam
 
     if (proxy->dir_node && !proxy->uid_blocked) {
         u32 hash = full_name_hash((const void *)(unsigned long)NOMOUNT_MAGIC_SIG, name, namelen);
-        if (READ_ONCE(proxy->dir_node->bloom_mask) & (1ULL << (hash & 63))) {
-            unsigned int seq;
-            uid_t fsuid = current_fsuid().val;
-            bool hidden = false;
-            rcu_read_lock();
-            do {
-                struct nomount_child_array *arr;
-                struct nomount_rule *rule;
-                seq = read_seqcount_begin(&proxy->dir_node->seq);
-                arr = rcu_dereference(proxy->dir_node->children);
-                hidden = likely(arr) && (rule = nomount_bsearch_child(arr, name, namelen, hash, NULL)) && (!rule->target_uid || rule->target_uid == fsuid);
-            } while (read_seqcount_retry(&proxy->dir_node->seq, seq));
-            rcu_read_unlock();
-            if (hidden) {
-                proxy->ctx.pos = offset;
-                return NM_ACTOR_CONTINUE;
-            }
+        if ((READ_ONCE(proxy->dir_node->bloom_mask) & (1ULL << (hash & 63))) &&
+            nomount_get_rule_info(proxy->dir_node, name, namelen, hash, NULL, false)) {
+            proxy->ctx.pos = offset;
+            return NM_ACTOR_CONTINUE;
         }
     }
 
