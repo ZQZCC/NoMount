@@ -112,13 +112,13 @@ void c_main(long *sp) {
                     h->flags = (is_whiteout) ? 4 : 0; h->uid = target_uid;
                     h->v_len = v_len; h->r_len = r_len;
 
-                    cursor = resolve_path(cursor + sizeof(*h), v_len, cwd, argv[i]);
-                    if (r_len > 0) cursor = resolve_path(cursor, r_len, cwd, argv[i+1]);
+                    cursor = resolve_path(cursor + sizeof(*h), cwd, argv[i]);
+                    if (r_len > 0) cursor = resolve_path(cursor, cwd, argv[i+1]);
                 } else {
                     struct nm_del_hdr *h = (void *)cursor;
                     h->uid = target_uid; h->v_len = v_len;
 
-                    cursor = resolve_path(cursor + sizeof(*h), v_len, cwd, argv[i]);
+                    cursor = resolve_path(cursor + sizeof(*h), cwd, argv[i]);
                 }
             }
 

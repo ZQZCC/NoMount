@@ -209,18 +209,14 @@ static noinline int resolved_path_length(const char *cwd, const char *rel) {
     return length;
 }
 
-static noinline char* resolve_path(char *p, unsigned long capacity, const char *cwd, const char *rel) {
-    char *end = p + capacity;
+static noinline char* resolve_path(char *p, const char *cwd, const char *rel) {
     if (cwd && *rel != '/') {
         while (*cwd) {
-            if (p == end) return 0;
             *p++ = *cwd++;
         }
-        if (p == end) return 0;
         *p++ = '/';
     }
     while (*rel) {
-        if (p == end) return 0;
         *p++ = *rel++;
     }
     return p;
