@@ -1083,16 +1083,17 @@ static int __nomount_inject_child_locked(struct nomount_dir_node *dir_node, stru
     return 0;
 }
 
-static void __nomount_delete_child_locked(struct nomount_rule *rule)
+static struct nomount_dir_node *__nomount_delete_child_locked(struct nomount_rule *rule)
 {
     struct nomount_dir_node *dir_node = rule->parent_dir;
+    struct nomount_dir_node *parent = dir_node && nm_dir_is_virtual(dir_node) ? dir_node : NULL;
     struct nomount_child_array *old_arr;
     struct nomount_rule **rules, *single;
     void *children;
     int old_count, target_idx = -1;
     u64 mask = 0;
 
-    if (unlikely(!dir_node || !(children = rcu_dereference_protected(dir_node->children, lockdep_is_held(&nomount_rwsem))))) return;
+    if (unlikely(!dir_node || !(children = rcu_dereference_protected(dir_node->children, lockdep_is_held(&nomount_rwsem))))) return parent;
     single = nm_children_is_single(children) ? nm_children_single_rule(children) : NULL;
     old_arr = single ? NULL : children;
     rules = old_arr ? nm_get_child_rules(old_arr) : &single;
@@ -1104,8 +1105,9 @@ static void __nomount_delete_child_locked(struct nomount_rule *rule)
             break;
         }
     }
-    if (target_idx == -1) return;
+    if (target_idx == -1) return parent;
 
+    rcu_read_lock();
     write_seqcount_begin(&dir_node->seq);
     if (old_count <= 2) {
         if (old_count == 2) {
@@ -1117,12 +1119,16 @@ static void __nomount_delete_child_locked(struct nomount_rule *rule)
             dir_node->bloom_mask = 0;
         }
         write_seqcount_end(&dir_node->seq);
+        if (old_count == 1 && !parent) {
+            smp_mb();
+            if (!rcu_access_pointer(dir_node->iop) && !rcu_access_pointer(dir_node->fop) &&
+                cmpxchg(&dir_node->v_inode, NULL, (struct inode *)-1L) == NULL)
+                call_rcu(&dir_node->rcu, nm_dir_rcu_free);
+        }
+        rcu_read_unlock();
         synchronize_srcu(&nomount_srcu);
         if (old_arr) kfree_rcu(old_arr, rcu);
-        if (old_count == 1 && !nm_dir_is_virtual(dir_node) && !rcu_access_pointer(dir_node->iop) &&
-             !rcu_access_pointer(dir_node->fop) && cmpxchg(&dir_node->v_inode, NULL, (struct inode *)-1L) == NULL)
-            call_rcu(&dir_node->rcu, nm_dir_rcu_free);
-        return;
+        return parent;
     }
 
     if (target_idx < old_count - 1) {
@@ -1139,6 +1145,8 @@ static void __nomount_delete_child_locked(struct nomount_rule *rule)
     for (int i = 0; i < old_arr->count; i++) mask |= (1ULL << (old_arr->hashes[i] & 63));
     dir_node->bloom_mask = mask;
     write_seqcount_end(&dir_node->seq);
+    rcu_read_unlock();
+    return parent;
 }
 
 static int nomount_generate_virtual_topology(struct nomount_rule *target_rule)
@@ -1246,24 +1254,13 @@ static void nomount_prune_empty_virtual_dirs(struct nomount_dir_node *dir_node, 
         if (rcu_access_pointer(dir_node->children))
             break;
 
-        if (!(owner = nm_dir_owner(dir_node)))
+        if (!(owner = nm_dir_owner(dir_node)) || !(owner->flags & NM_FLAG_VIRTUAL_DIR))
             break;
-
-        if (!(owner->flags & NM_FLAG_VIRTUAL_DIR)) {
-            if (cmpxchg(&dir_node->v_inode, NULL, (struct inode *)-1L) == NULL) {
-                nm_detach_dir_node(dir_node);
-                call_rcu(&dir_node->rcu, nm_dir_rcu_free);
-            } else {
-                nm_dir_set_owner(dir_node, NULL);
-            }
-            break;
-        }
 
         list_move(&owner->list_node, victims);
         nm_art_remove_leaf(&nomount_art_root, owner);
-        if (owner->parent_dir) __nomount_delete_child_locked(owner);
+        dir_node = __nomount_delete_child_locked(owner);
         nm_debug("Pruned empty virtual directory: %s\n", nm_get_vpath(owner));
-        dir_node = owner->parent_dir;
     }
 }
 
@@ -1338,8 +1335,8 @@ static void nm_detach_rule_locked(struct nomount_rule *rule, struct list_head *v
     list_move(&rule->list_node, victims);
     nm_art_remove_leaf(&nomount_art_root, rule);
     if (rule->parent_dir) {
-        __nomount_delete_child_locked(rule);
-        if (prune) nomount_prune_empty_virtual_dirs(rule->parent_dir, victims); 
+        struct nomount_dir_node *parent = __nomount_delete_child_locked(rule);
+        if (prune) nomount_prune_empty_virtual_dirs(parent, victims);
     }
 }
 
