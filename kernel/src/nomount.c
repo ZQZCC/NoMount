@@ -206,7 +206,7 @@ static inline void nomount_emit_virtual_children(struct dir_context *ctx, struct
 	for (id = nm_unpack_pos(ctx->pos); ; id++) {
 		char name_buf[NAME_MAX + 1];
 		int name_len = 0;
-		u32 v_hash = 0;
+		unsigned long v_ino = 0;
 		unsigned char d_type = 0;
 		bool do_emit = false, has_more = false;
 
@@ -224,7 +224,7 @@ static inline void nomount_emit_virtual_children(struct dir_context *ctx, struct
 					name_len = rule->child_len;
 					if (likely(name_len <= NAME_MAX)) {
 						memcpy(name_buf, nm_get_child_name(rule), name_len);
-						v_hash = rule->v_hash;
+						v_ino = rule->v_ino;
 						d_type = (rule->flags & NM_FLAG_IS_DIR) ? DT_DIR : DT_REG;
 						do_emit = true;
 					}
@@ -236,7 +236,7 @@ static inline void nomount_emit_virtual_children(struct dir_context *ctx, struct
 
 		ctx->pos = nm_pack_pos(id);
 		if (do_emit) {
-			if (!dir_emit(ctx, name_buf, name_len, v_hash, d_type))
+			if (!dir_emit(ctx, name_buf, name_len, v_ino, d_type))
 				break;
 		}
 		ctx->pos = nm_pack_pos(id + 1);
