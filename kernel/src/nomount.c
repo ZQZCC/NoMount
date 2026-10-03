@@ -1375,7 +1375,9 @@ static struct nomount_rule *nm_alloc_rule(const char *v_path, const char *r_path
     if (!is_whiteout) memcpy(nm_get_rpath(rule), r_path, r_len);
     nm_get_rpath(rule)[r_len] = '\0';
 
-    if (!is_whiteout && kern_path(nm_get_rpath(rule), LOOKUP_FOLLOW, &rule->r_path) == 0) {
+    if (!is_whiteout) {
+        int err = kern_path(nm_get_rpath(rule), LOOKUP_FOLLOW, &rule->r_path);
+        if (err) { kfree(rule); return ERR_PTR(err); }
         struct inode *real_inode = d_backing_inode(rule->r_path.dentry);
         if (likely(real_inode && S_ISDIR(real_inode->i_mode))) rule->flags |= NM_FLAG_IS_DIR;
     }
