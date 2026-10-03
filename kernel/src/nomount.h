@@ -41,22 +41,17 @@ static LIST_HEAD(nomount_sb_list);
 #define nm_get_rpath(rule) ((rule)->paths)
 #define nm_get_child_name(leaf) (nm_get_vpath(leaf) + (leaf)->v_len - (leaf)->child_len)
 
-struct nm_iop {
-    struct inode_operations fake_iop; /* MUST be exactly at offset 0 */
+struct nm_dir_ops {
+    struct inode_operations fake_iop;
+    struct file_operations fake_fop;
     const struct inode_operations *orig_iop;
+    const struct file_operations *orig_fop;
     struct nomount_dir_node *dir_node;
     struct rcu_head rcu;
 
     /* Dentry Operations Hijacking */
     struct dentry_operations fake_dops;
     const struct dentry_operations *orig_dops;
-};
-
-struct nm_fop {
-    struct file_operations fake_fop;  /* MUST be exactly at offset 0 */
-    const struct file_operations *orig_fop;
-    struct nomount_dir_node *dir_node;
-    struct rcu_head rcu;
 };
 
 struct nm_sop {
@@ -340,19 +335,19 @@ static inline struct dentry *nm_hash_and_lookup(struct dentry *dir, struct qstr 
     return (unlikely(dir->d_flags & DCACHE_OP_HASH) && dir->d_op->d_hash(dir, n) < 0) ? NULL : d_lookup(dir, n);
 }
 
-static inline struct nm_iop *nm_get_nm_iop(const struct inode_operations *iop) {
+static inline struct nm_dir_ops *nm_get_nm_iop(const struct inode_operations *iop) {
     if (likely(iop) && iop->lookup == nomount_hijacked_lookup)
-        return container_of(iop, struct nm_iop, fake_iop);
+        return container_of(iop, struct nm_dir_ops, fake_iop);
     return NULL;
 }
 
-static inline struct nm_fop *nm_get_nm_fop(const struct file_operations *fop) {
+static inline struct nm_dir_ops *nm_get_nm_fop(const struct file_operations *fop) {
     if (unlikely(!fop)) return NULL;
     if (fop->iterate_shared == nomount_hijacked_iterate_dir)
-        return container_of(fop, struct nm_fop, fake_fop);
+        return container_of(fop, struct nm_dir_ops, fake_fop);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
     if (fop->iterate == nomount_hijacked_iterate_dir)
-        return container_of(fop, struct nm_fop, fake_fop);
+        return container_of(fop, struct nm_dir_ops, fake_fop);
 #endif
     return NULL;
 }
@@ -364,7 +359,7 @@ static inline struct nm_sop *nm_get_nm_sop(const struct super_operations *sop) {
 }
 
 #define NM_DOP_INITIALIZING ((const struct dentry_operations *)1L)
-static inline const struct dentry_operations *nm_get_orig_dops(struct nm_iop *iop)
+static inline const struct dentry_operations *nm_get_orig_dops(struct nm_dir_ops *iop)
 {
     const struct dentry_operations *dops;
     if (!iop) return NULL;

@@ -138,20 +138,16 @@ static inline void nm_destroy_virtual_inode(struct inode *inode)
 
 static inline void nm_destroy_hijacked_inode(struct inode *inode, bool restore)
 {
-    struct nm_iop *nm_iop = nm_get_nm_iop(inode->i_op);
-    struct nm_fop *nm_fop = nm_get_nm_fop(inode->i_fop);
-    struct nomount_dir_node *dir_node = nm_iop ? nm_iop->dir_node : (nm_fop ? nm_fop->dir_node : NULL);
+    struct nm_dir_ops *ops = nm_get_nm_iop(inode->i_op);
+    if (!ops) ops = nm_get_nm_fop(inode->i_fop);
+    if (!ops) return;
 
-    if (nm_iop) {
-        if (restore) smp_store_release(&inode->i_op, nm_iop->orig_iop);
-        kfree_rcu(nm_iop, rcu);
-        nm_dir_put(dir_node);
+    if (restore) {
+        if (inode->i_op == &ops->fake_iop) smp_store_release(&inode->i_op, ops->orig_iop);
+        if (inode->i_fop == &ops->fake_fop) smp_store_release(&inode->i_fop, ops->orig_fop);
     }
-    if (nm_fop) {
-        if (restore) smp_store_release(&inode->i_fop, nm_fop->orig_fop);
-        kfree_rcu(nm_fop, rcu);
-        nm_dir_put(dir_node);
-    }
+    nm_dir_put(ops->dir_node);
+    kfree_rcu(ops, rcu);
 }
 
 struct nomount_proxy_ctx {
@@ -316,7 +312,7 @@ out:
 
 static struct dentry *nomount_hijacked_lookup(struct inode *dir, struct dentry *dentry, unsigned int flags)
 {
-    struct nm_iop *nm_iop = nm_get_nm_iop(smp_load_acquire(&dir->i_op));
+    struct nm_dir_ops *nm_iop = nm_get_nm_iop(smp_load_acquire(&dir->i_op));
     struct nomount_dir_node *dir_node = nm_iop ? READ_ONCE(nm_iop->dir_node) : NULL;
     struct dentry *res;
     u32 hash;
@@ -349,7 +345,7 @@ do_real_lookup:
 
 static int nomount_hijacked_iterate_dir(struct file *file, struct dir_context *ctx)
 {
-    struct nm_fop *nm_fop = nm_get_nm_fop(smp_load_acquire(&file->f_op));
+    struct nm_dir_ops *nm_fop = nm_get_nm_fop(smp_load_acquire(&file->f_op));
     struct nomount_dir_node *dir_node = nm_fop ? READ_ONCE(nm_fop->dir_node) : NULL;
     const struct file_operations *orig_fop = nm_fop ? nm_fop->orig_fop : NULL;
     struct nomount_proxy_ctx proxy_ctx = { .ctx.actor = nomount_actor_proxy };
@@ -746,7 +742,7 @@ static int nm_d_revalidate_common(struct inode *parent_inode, const struct qstr 
     const struct dentry_operations *orig_dops;
     struct inode *inode = READ_ONCE(dentry->d_inode);
     struct nm_rule_info rule_info;
-    struct nm_iop *iop = NULL;
+    struct nm_dir_ops *iop = NULL;
     bool has_rule = false, owned;
     if (unlikely(!parent_inode)) return 1;
 
@@ -929,47 +925,45 @@ static inline void nomount_hijack_superblock(struct super_block *sb)
 
 static inline void nomount_hijack_dir_ops(struct nomount_dir_node *dir_node, struct inode *inode)
 {
-    struct nm_iop *nm_iop = NULL;
-    struct nm_fop *nm_fop = NULL;
-
-    if (inode->i_op && !nm_get_nm_iop(smp_load_acquire(&inode->i_op))) {
-        if (likely((nm_iop = kmalloc(sizeof(*nm_iop), GFP_KERNEL)))) {
-            nm_iop->fake_iop = *(inode->i_op);
-            nm_iop->orig_iop = inode->i_op;
-            nm_iop->dir_node = dir_node;
-            atomic_inc(&dir_node->refs);
-            nm_iop->orig_dops = NULL;
-
-            nm_iop->fake_iop.lookup = nomount_hijacked_lookup;
-            smp_store_release(&inode->i_op, &nm_iop->fake_iop);
-        }
-    }
-
-    if (inode->i_fop && !nm_get_nm_fop(smp_load_acquire(&inode->i_fop))) {
-        if (likely((nm_fop = kmalloc(sizeof(*nm_fop), GFP_KERNEL)))) {
-            nm_fop->fake_fop = *(inode->i_fop);
-            nm_fop->orig_fop = inode->i_fop;
-            nm_fop->dir_node = dir_node;
-            atomic_inc(&dir_node->refs);
-
-            if (inode->i_fop->iterate_shared)
-                nm_fop->fake_fop.iterate_shared = nomount_hijacked_iterate_dir;
+    const struct inode_operations *iop = smp_load_acquire(&inode->i_op);
+    const struct file_operations *fop = smp_load_acquire(&inode->i_fop);
+    struct nm_dir_ops *ops;
+    bool iterate = fop && (fop->iterate_shared
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
-            if (nm_fop->fake_fop.iterate)
-                nm_fop->fake_fop.iterate = nomount_hijacked_iterate_dir;
+        || fop->iterate
 #endif
-            smp_store_release(&inode->i_fop, &nm_fop->fake_fop);
-        }
-    }
+    );
 
-    if (nm_iop || nm_fop) nm_debug("Successfully hijacked VFS ops for parent dir (ino: %lu)\n", (unsigned long)inode->i_ino);
+    if (nm_get_nm_iop(iop) || nm_get_nm_fop(fop) || (!iop && !iterate) ||
+            !(ops = kmalloc(sizeof(*ops), GFP_KERNEL))) return;
+
+    ops->orig_iop = iop;
+    ops->orig_fop = fop;
+    ops->orig_dops = NULL;
+    ops->dir_node = dir_node;
+    if (iop) {
+        ops->fake_iop = *iop;
+        ops->fake_iop.lookup = nomount_hijacked_lookup;
+    }
+    if (fop) {
+        ops->fake_fop = *fop;
+        if (fop->iterate_shared) ops->fake_fop.iterate_shared = nomount_hijacked_iterate_dir;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
+        if (fop->iterate) ops->fake_fop.iterate = nomount_hijacked_iterate_dir;
+#endif
+    }
+    atomic_inc(&dir_node->refs);
+    if (iop) smp_store_release(&inode->i_op, &ops->fake_iop);
+    if (fop) smp_store_release(&inode->i_fop, &ops->fake_fop);
+
+    nm_debug("Successfully hijacked VFS ops for parent dir (ino: %lu)\n", (unsigned long)inode->i_ino);
 }
 
 static void nomount_hijack_dentry_ops(struct inode *dir, struct dentry *dentry, bool injected)
 {
 #define DCACHE_OPS (DCACHE_OP_HASH | DCACHE_OP_COMPARE | DCACHE_OP_DELETE | DCACHE_OP_PRUNE | DCACHE_OP_REAL)
     const struct dentry_operations *orig, *current_orig;
-    struct nm_iop *iop;
+    struct nm_dir_ops *iop;
 
     if (!dentry || !dir) return;
     iop = nm_get_nm_iop(smp_load_acquire(&dir->i_op));
@@ -1172,8 +1166,8 @@ static struct nomount_leaf *nm_alloc_leaf(const char *path, u16 len, u32 flags)
         leaf->v_ino = inode->i_ino;
         d_drop(anchor.dentry);
         if (S_ISDIR(inode->i_mode) && inode->i_op != &nm_dir_iops) {
-            struct nm_iop *iop = nm_get_nm_iop(smp_load_acquire(&inode->i_op));
-            struct nm_fop *fop = nm_get_nm_fop(smp_load_acquire(&inode->i_fop));
+            struct nm_dir_ops *iop = nm_get_nm_iop(smp_load_acquire(&inode->i_op));
+            struct nm_dir_ops *fop = nm_get_nm_fop(smp_load_acquire(&inode->i_fop));
             struct nomount_dir_node *dir = iop ? iop->dir_node : (fop ? fop->dir_node : NULL);
             if (dir && !dir->owner) {
                 leaf->this_dir = dir;
@@ -1254,8 +1248,8 @@ static int nomount_generate_virtual_topology(struct nomount_leaf *target, unsign
                 dir = ((struct nm_inode_info *)inode->i_private)->dir_node;
                 atomic_inc(&dir->refs);
             } else {
-                struct nm_iop *iop = nm_get_nm_iop(smp_load_acquire(&inode->i_op));
-                struct nm_fop *fop = nm_get_nm_fop(smp_load_acquire(&inode->i_fop));
+                struct nm_dir_ops *iop = nm_get_nm_iop(smp_load_acquire(&inode->i_op));
+                struct nm_dir_ops *fop = nm_get_nm_fop(smp_load_acquire(&inode->i_fop));
                 dir = iop ? iop->dir_node : (fop ? fop->dir_node : NULL);
                 if (dir) atomic_inc(&dir->refs);
                 else dir = __nomount_alloc_dir_node();
