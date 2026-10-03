@@ -32,25 +32,14 @@
 #define nm_err(fmt, ...)  printk(KERN_ERR "NoMount: [ERROR] " fmt, ##__VA_ARGS__)
 
 static struct nm_uid_array __rcu *nomount_uids = NULL;
-static DEFINE_HASHTABLE(nomount_rules_ht, 6);
+static DEFINE_HASHTABLE(nomount_leaves_ht, 6);
 static DEFINE_MUTEX(nomount_mutex);
 static LIST_HEAD(nomount_sb_list);
 
 /* * Helpers to dynamically calculate the memory address of the strings / structs */
-#define nm_get_vpath(rule) ((rule)->paths)
-#define nm_get_rpath(rule) ((rule)->paths + (rule)->v_len + 1)
-#define nm_get_child_name(rule) (nm_get_vpath(rule) + (rule)->v_len - (rule)->child_len)
-#define nm_get_child_rules(array) ((struct nomount_rule **)((array)->hashes + (array)->capacity))
-#define nm_children_is_single(children) ((unsigned long)(children) & 1UL)
-#define nm_children_single_rule(children) ((struct nomount_rule *)((unsigned long)(children) & ~1UL))
-#define nm_children_from_single(rule) ((void *)((unsigned long)(rule) | 1UL))
-#define nm_dir_tag(dir_node) READ_ONCE((dir_node)->_tag_ptr)
-#define nm_dir_is_virtual(dir_node) (nm_dir_tag((dir_node)) & 1UL)
-#define nm_dir_set_owner(dir_node, owner) WRITE_ONCE((dir_node)->_tag_ptr, (unsigned long)(owner) | 1UL)
-#define nm_dir_owner(dir_node) ({ \
-    unsigned long _tag = nm_dir_tag(dir_node); \
-    (_tag & 1UL) ? (struct nomount_rule *)(_tag & ~1UL) : NULL; \
-})
+#define nm_get_vpath(leaf) ((leaf)->paths)
+#define nm_get_rpath(rule) ((rule)->paths)
+#define nm_get_child_name(leaf) (nm_get_vpath(leaf) + (leaf)->v_len - (leaf)->child_len)
 
 struct nm_iop {
     struct inode_operations fake_iop; /* MUST be exactly at offset 0 */
@@ -81,53 +70,69 @@ struct nm_sop {
 };
 
 struct nm_inode_info {
-    struct path r_path;
     struct nomount_dir_node *dir_node;
-    u8 flags;
+    struct nomount_rule *rule;
+};
+
+struct nm_child {
+    u32 hash;
+    struct nomount_leaf *leaf;
 };
 
 struct nomount_child_array {
     struct rcu_head rcu;
+    u64 bloom_mask;
     int count;
-    int capacity;
-    u32 hashes[];
+    struct nm_child entries[];
 };
 
 struct nomount_dir_node {
     struct rcu_head rcu;
-    void __rcu *children;
-    u64 bloom_mask;
-    struct inode *v_inode;
+    struct nomount_child_array __rcu *children;
+    atomic_t refs;
     struct dentry *pinned_dentry;
-    union {
-        unsigned long _tag_ptr;
-        struct {
-            struct nm_iop __rcu *iop;
-            struct nm_fop __rcu *fop;
-        };
-    };
+    struct nomount_leaf *owner;
 };
 
 struct nomount_rule {
     struct path r_path;
+    atomic_t refs;
+    unsigned int target_uid;
+    u16 r_len;
+    u16 flags;
+    struct nomount_rule *next;
+    char paths[];
+};
+
+struct nm_rule_array {
+    struct rcu_head rcu;
+    int count;
+    struct nomount_rule *rules[];
+};
+
+struct nomount_leaf {
+    struct path anchor;
+    struct nm_rule_array __rcu *rules;
     struct nomount_dir_node *this_dir;
+    struct nomount_dir_node *parent_dir;
     unsigned long v_ino;
     u32 v_hash;
-    unsigned int target_uid;
     u16 v_len;
-    u16 r_len;
     u16 child_len;
-    u16 flags;
-
-    struct nomount_dir_node *parent_dir;
     struct hlist_node ht_node;
+    struct nomount_leaf *next;
     char paths[];
+};
+
+struct nm_updates {
+    struct nomount_rule *rules;
+    struct nomount_leaf *leaves;
 };
 
 struct nm_rule_info {
     u16 flags;
     unsigned long v_ino;
-    struct path r_path;
+    struct nomount_rule *rule;
     struct nomount_dir_node *this_dir;
 };
 
@@ -154,6 +159,7 @@ static int nomount_hijacked_iterate_dir(struct file *file, struct dir_context *c
 static void nomount_hijacked_evict_inode(struct inode *inode);
 static void nomount_hijack_dentry_ops(struct inode *dir, struct dentry *dentry, bool injected);
 static void nm_free_rule(struct nomount_rule *rule);
+static void nm_dir_put(struct nomount_dir_node *dir_node);
 
 /* =====================================================================
  * NoMount VFS Offset Protocol
