@@ -1540,8 +1540,6 @@ static int nm_process_payload(unsigned long user_addr)
     }
 
     payload->status = 0;
-    buf_ptr = payload->buffer + payload->arg1;
-    buf_end = payload->buffer + (payload->data_size > sizeof(payload->buffer) ? sizeof(payload->buffer) : payload->data_size);
 
     switch (payload->cmd) {
         case NM_CMD_GET_VERSION:
@@ -1550,13 +1548,27 @@ static int nm_process_payload(unsigned long user_addr)
 
         case NM_CMD_ADD_RULE: {
             struct nomount_rule *r_victims = NULL;
-            if (payload->data_size > sizeof(payload->buffer)) { payload->status = -EINVAL; break; }
-            while ((size_t)(buf_end - buf_ptr) >= sizeof(struct nm_rule_hdr)) {
-                struct nm_rule_hdr *h = (void *)buf_ptr;
-                buf_ptr += sizeof(*h);
-                if ((h->v_len + h->r_len) > (size_t)(buf_end - buf_ptr) || unlikely(h->v_len >= PATH_MAX || h->r_len >= PATH_MAX)) break;
-                payload->status = __nomount_add_rule(buf_ptr, buf_ptr + h->v_len, h->v_len, h->r_len, h->flags, h->uid, &r_victims);
-                buf_ptr += (size_t)(h->v_len + h->r_len);
+            unsigned int data_size = payload->data_size, offset = payload->arg1;
+            if (data_size > sizeof(payload->buffer) || offset > data_size) { payload->status = -EINVAL; break; }
+            buf_ptr = payload->buffer + offset;
+            buf_end = payload->buffer + data_size;
+            while (buf_ptr < buf_end) {
+                struct nm_rule_hdr h;
+                int err;
+                if ((size_t)(buf_end - buf_ptr) < sizeof(h)) {
+                    if (!payload->status) payload->status = -EINVAL;
+                    break;
+                }
+                h = *(struct nm_rule_hdr *)buf_ptr;
+                if (unlikely(!h.v_len || h.v_len >= PATH_MAX || h.r_len >= PATH_MAX) ||
+                        h.v_len + h.r_len > (size_t)(buf_end - buf_ptr) - sizeof(h)) {
+                    if (!payload->status) payload->status = -EINVAL;
+                    break;
+                }
+                buf_ptr += sizeof(h);
+                err = __nomount_add_rule(buf_ptr, buf_ptr + h.v_len, h.v_len, h.r_len, h.flags, h.uid, &r_victims);
+                if (!payload->status) payload->status = err;
+                buf_ptr += (size_t)(h.v_len + h.r_len);
             }
             payload->arg1 = buf_ptr - payload->buffer;
 
@@ -1573,14 +1585,19 @@ static int nm_process_payload(unsigned long user_addr)
 
         case NM_CMD_DEL_RULE: {
             struct nomount_rule *r_victims = NULL;
-            if (payload->data_size > sizeof(payload->buffer)) { payload->status = -EINVAL; break; }
+            unsigned int data_size = payload->data_size, offset = payload->arg1;
+            if (data_size > sizeof(payload->buffer) || offset > data_size) { payload->status = -EINVAL; break; }
+            buf_ptr = payload->buffer + offset;
+            buf_end = payload->buffer + data_size;
             mutex_lock(&nomount_mutex);
-            while ((size_t)(buf_end - buf_ptr) >= sizeof(struct nm_del_hdr)) {
-                struct nm_del_hdr *h = (void *)buf_ptr;
-                buf_ptr += sizeof(*h);
-                if (h->v_len > (size_t)(buf_end - buf_ptr)) break;
-                __nomount_del_rule(buf_ptr, h->v_len, h->uid, &r_victims);
-                buf_ptr += h->v_len;
+            while (buf_ptr < buf_end) {
+                struct nm_del_hdr h;
+                if ((size_t)(buf_end - buf_ptr) < sizeof(h)) { payload->status = -EINVAL; break; }
+                h = *(struct nm_del_hdr *)buf_ptr;
+                if (!h.v_len || h.v_len > (size_t)(buf_end - buf_ptr) - sizeof(h)) { payload->status = -EINVAL; break; }
+                buf_ptr += sizeof(h);
+                __nomount_del_rule(buf_ptr, h.v_len, h.uid, &r_victims);
+                buf_ptr += h.v_len;
             }
             mutex_unlock(&nomount_mutex);
             payload->arg1 = buf_ptr - payload->buffer;
@@ -1592,7 +1609,7 @@ static int nm_process_payload(unsigned long user_addr)
                     nm_free_rule(r_victims);
                     r_victims = next;
                 }
-            } else payload->status = -ENOENT;
+            } else if (!payload->status) payload->status = -ENOENT;
             break;
         }
 
