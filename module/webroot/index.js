@@ -351,8 +351,7 @@ async function loadModules() {
                 [ ! -d "$mod" ] || [ "$mod" = "nomount" ] || [ ! -f "$mod/module.prop" ] && continue
                 has_injectable=0
                 for p in ${TARGET_PARTITIONS}; do [ -d "$mod/$p" ] && { [ -d "/$p" ] || [ -d "/system/$p" ]; } && has_injectable=1 && break; done
-                [ $has_injectable -eq 0 ] && continue
-                echo "$mod|$(grep "^name=" "$mod/module.prop" | head -n1 | cut -d= -f2-)|$([ -f "$mod/disable" ] && echo true || echo false)|$([ -f "$mod/skip_mount" ] && echo true || echo false)"
+                echo "$mod|$(grep "^name=" "$mod/module.prop" | head -n1 | cut -d= -f2-)|$([ -f "$mod/disable" ] && echo true || echo false)|$([ -f "$mod/skip_mount" ] && echo true || echo false)|$has_injectable"
             done
         `;
 
@@ -364,17 +363,18 @@ async function loadModules() {
         
         const ruleCountByMod = {};
         activeRules.forEach(r => {
-            if (r?.real?.startsWith(MOD_DIR)) {
+            if (r?.real?.startsWith(`${MOD_DIR}/`)) {
                 const parts = r.real.split('/');
                 if (parts[4] && parts[4] !== 'nomount') ruleCountByMod[parts[4]] = (ruleCountByMod[parts[4]] || 0) + 1;
             }
         });
 
         const htmlArr = lines.map(line => {
-            const [modId, realName, disableStr, skipStr] = line.split('|');
-            const hasDisable = disableStr === 'true', hasSkipMount = skipStr === 'true';
+            const [modId, realName, disableStr, skipStr, injectableStr] = line.split('|');
+            const hasDisable = disableStr === 'true', hasSkipMount = skipStr === 'true', hasInjectable = injectableStr === '1';
             const fileCount = ruleCountByMod[modId] || 0;
             const isLoaded = fileCount > 0;
+            if (!hasInjectable && !isLoaded) return '';
             const statusKey = isLoaded ? (hasDisable ? 'status_loaded' : 'status_active') : (hasDisable ? 'status_disabled' : (hasSkipMount ? 'status_skipped' : 'status_inactive'));
             return `
                 <div class="card module-card" data-module-id="${modId}">
@@ -391,18 +391,18 @@ async function loadModules() {
                             </span>
                         </label>
                     </div>
-                    <div class="module-divider"></div>
+                    ${hasInjectable ? `<div class="module-divider"></div>
                     <div class="module-extension">
                         <button class="btn-hot-action ${isLoaded ? 'unload' : ''}" id="btn-hot-${modId}">
                             <span>${isLoaded ? '热卸载' : '热加载'}</span>
                         </button>
-                    </div>
+                    </div>` : ''}
                 </div>
             `;
-        });
+        }).filter(Boolean);
 
         if (renderId === currentRenderId) {
-            lines.length === 0 ? renderEmptyState(listContainer, '(._.)', '未找到需要挂载的模块') : listContainer.innerHTML = htmlArr.join('');
+            htmlArr.length === 0 ? renderEmptyState(listContainer, '(._.)', '未找到需要挂载的模块') : listContainer.innerHTML = htmlArr.join('');
         }
     } catch (e) {
         renderTextState(listContainer, 'error-message', `Error: ${e.message}`);
@@ -940,6 +940,7 @@ function initDelegationAndAttach() {
         card.querySelector('.file-count span').textContent = `已注入: ${formatNumber(newFileCount)} 个文件`;
         card.querySelector('.module-info p').textContent = `状态: ${STATUS_TEXT[statusKey]}`;
         const hotBtn = card.querySelector('.btn-hot-action');
+        if (!hotBtn) return;
         const btnSpan = hotBtn.querySelector('span');
 
         if (nowLoaded) {
