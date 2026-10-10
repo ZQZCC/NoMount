@@ -366,31 +366,37 @@ const UI = {};
 let currentActiveViewId = 'view-home';
 let currentActiveViewTitle = '';
 
-let currentHistoryLevel = 0;
-history.replaceState({ level: 0 }, '');
+let nmHistory = { level: 0, dialog: null, depth: 0 };
+history.replaceState(nmHistory, '');
+
+const nmDialogClosers = { presets: null, advanced: null };
+function nmPush(state) {
+    nmHistory = { level: state.level, dialog: state.dialog ?? null, depth: nmHistory.depth + 1 };
+    history.pushState(nmHistory, '');
+}
+function nmReplace(state) {
+    nmHistory = { level: state.level, dialog: state.dialog ?? null, depth: nmHistory.depth };
+    history.replaceState(nmHistory, '');
+}
 
 window.addEventListener('popstate', (e) => {
-    const level = e.state ? e.state.level : 0;
+    const prev = nmHistory;
+    const next = e.state || { level: 0, dialog: null, depth: 0 };
 
-    if (currentHistoryLevel === 3 && level < 3) {
-        currentHistoryLevel = level;
-        const uidModal = document.getElementById('uid-input-modal');
-        const cancelBtn = document.getElementById('btn-cancel-uid');
-        if (uidModal && uidModal.classList.contains('active') && cancelBtn) cancelBtn.click();
+    if (prev.dialog === 'advancedColor' && next.dialog !== 'advancedColor')
+        nmDialogClosers.advanced?.();
+    if (prev.dialog === 'colorPresets' && next.dialog !== 'colorPresets')
+        nmDialogClosers.presets?.();
+    if (prev.level === 3 && next.level < 3)
+        closeUidModalFromHistory();
+    if (prev.level === 2 && next.level < 2) {
+        closeAppSelector(true);
+        exitMultiSelectMode();
     }
-
-    if (currentHistoryLevel === 2 && level < 2) {
-        currentHistoryLevel = level;
-        if (typeof closeAppSelector === 'function') closeAppSelector(true);
-        if (typeof exitMultiSelectMode === 'function') exitMultiSelectMode();
-    }
-
-    if (currentHistoryLevel >= 1 && level === 0) {
-        currentHistoryLevel = level;
+    if (prev.level >= 1 && next.level === 0)
         switchToTab('view-home', false);
-    }
 
-    currentHistoryLevel = level;
+    nmHistory = next;
 });
 
 function switchToTab(target, pushToHistory = true) {
@@ -419,11 +425,10 @@ function switchToTab(target, pushToHistory = true) {
 
     if (pushToHistory) {
         if (target === 'view-home') {
-            if (currentHistoryLevel === 1) { history.back(); currentHistoryLevel = 0; } 
-            else if (currentHistoryLevel > 1) { history.go(-currentHistoryLevel); currentHistoryLevel = 0; }
+            if (nmHistory.depth > 0) history.go(-nmHistory.depth);
         } else {
-            if (currentHistoryLevel === 0) { history.pushState({ level: 1 }, ''); currentHistoryLevel = 1; } 
-            else if (currentHistoryLevel === 1) { history.replaceState({ level: 1 }, ''); }
+            if (nmHistory.level === 0) nmPush({ level: 1 });
+            else nmReplace({ level: 1 });
         }
     }
 
@@ -863,11 +868,7 @@ function closeAppSelector(fromHistory = false) {
     content?.style.removeProperty('--app-selector-top');
     content?.style.removeProperty('--app-selector-height');
     if (listObserver) listObserver.disconnect();
-
-    if (!fromHistory && currentHistoryLevel >= 2) {
-        history.back();
-        currentHistoryLevel = 1;
-    }
+    if (!fromHistory && nmHistory.level >= 2) history.back();
 }
 
 function openAppSelector() {
@@ -886,11 +887,7 @@ function openAppSelector() {
     content.classList.add('viewport-locked');
     modal.classList.add('active');
 
-    if (currentHistoryLevel < 2) {
-        history.pushState({ level: 2 }, '');
-        currentHistoryLevel = 2;
-    }
-
+    if (nmHistory.level < 2) nmPush({ level: 2 });
     if (listObserver) listObserver.disconnect();
     document.getElementById('filter-menu').classList.remove('active'); 
     searchInput.value = '';
@@ -1169,27 +1166,31 @@ function initOptionsUI() {
             renderPresets();
         };
 
-        window.addEventListener('popstate', (e) => {
-            if (isAdvOpen && (!e.state || e.state.dialog !== 'advancedColor')) {
-                dialogAdv.classList.remove('show');
-                isAdvOpen = false;
-                customColor = originalColor;
-                applyAppearance();
-                renderPresets();
-            }
-            if (!e.state || e.state.dialog !== 'colorPresets') {
-                dialogPresets.classList.remove('show');
-            }
-        });
+
+        nmDialogClosers.presets = () => { dialogPresets.classList.remove('show'); };
+        nmDialogClosers.advanced = () => {
+            if (!isAdvOpen) return;
+            dialogAdv.classList.remove('show');
+            isAdvOpen = false;
+            customColor = originalColor;
+            applyAppearance();
+            renderPresets();
+        };
+
+        customColCard.onclick = () => {
+            originalColor = customColor;
+            nmPush({ level: 1, dialog: 'colorPresets' });
+            dialogPresets.classList.add('show');
+            renderPresets();
+        };
 
         document.getElementById('btn-color-presets-close').onclick = () => history.back();
         document.getElementById('btn-adv-color-open').onclick = () => {
             isAdvOpen = true;
-            history.pushState({ dialog: 'advancedColor' }, '');
+            nmPush({ level: 1, dialog: 'advancedColor' });
             dialogAdv.classList.add('show');
             initAdvancedPicker();
         };
-
         document.getElementById('btn-adv-color-cancel').onclick = () => history.back();
         document.getElementById('btn-adv-color-accept').onclick = () => {
             originalColor = customColor;
@@ -1333,6 +1334,39 @@ async function refreshCurrentView() {
     else if (id === 'view-modules') await loadModules();
     else if (id === 'view-exclusions') await loadExclusions();
     else if (id === 'view-options') await loadOptions();
+}
+
+let nmUidModalResolver = null;
+let nmUidModalPendingValue = null;
+
+function closeUidModalFromHistory() {
+    const modal = document.getElementById('uid-input-modal');
+    if (!modal?.classList.contains('active')) return;
+    modal.classList.remove('active');
+    document.getElementById('manual-uid-input')?.blur();
+    const resolve = nmUidModalResolver;
+    const value = nmUidModalPendingValue;
+    nmUidModalResolver = null;
+    nmUidModalPendingValue = null;
+    resolve?.(value);
+}
+
+function getManualUid() {
+    return new Promise(resolve => {
+        nmUidModalResolver = resolve;
+        nmUidModalPendingValue = null;
+        const modalDialog = document.getElementById('uid-input-modal');
+        const input = document.getElementById('manual-uid-input');
+        const btnCancel = document.getElementById('btn-cancel-uid');
+        const btnAdd = document.getElementById('btn-confirm-uid');
+        modalDialog.classList.add('active');
+        input.value = '';
+        setTimeout(() => input.focus(), 150);
+        nmPush({ level: 3 });
+        btnCancel.onclick = () => history.back();
+        btnAdd.onclick = () => { nmUidModalPendingValue = input.value; history.back(); };
+        modalDialog.onclick = (e) => { if (e.target === modalDialog) history.back(); };
+    });
 }
 
 function initDelegationAndAttach() {
@@ -1533,36 +1567,6 @@ function initDelegationAndAttach() {
                 await loadExclusions();
             }
         } else {
-            const getManualUid = () => new Promise(resolve => {
-                const modalDialog = document.getElementById('uid-input-modal');
-                const input = document.getElementById('manual-uid-input');
-                const btnCancel = document.getElementById('btn-cancel-uid');
-                const btnAdd = document.getElementById('btn-confirm-uid');
-                modalDialog.classList.add('active');
-
-                const wasLevel = currentHistoryLevel;
-                history.pushState({ level: 3 }, '');
-                currentHistoryLevel = 3;
-
-                input.value = '';
-                setTimeout(() => input.focus(), 150);
-                const cleanup = () => {
-                    modalDialog.classList.remove('active');
-                    input.blur();
-                    btnCancel.onclick = null;
-                    btnAdd.onclick = null;
-                    modalDialog.onclick = null;
-
-                    if (currentHistoryLevel === 3) {
-                        history.back();
-                        currentHistoryLevel = wasLevel;
-                    }
-                };
-                btnCancel.onclick = () => { cleanup(); resolve(null); };
-                btnAdd.onclick = () => { cleanup(); resolve(input.value); };
-                modalDialog.onclick = (e) => {  if (e.target === modalDialog) { cleanup(); resolve(null); }  };
-            });
-
             const manualUid = await getManualUid();
             if (manualUid && /^\d+$/.test(manualUid.trim())) {
                 closeAppSelector();
