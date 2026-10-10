@@ -310,39 +310,54 @@ function applyAppearance() {
 // Apply immediately to prevent flashes
 applyAppearance();
 
+let nmThemeDirty = false;
 async function syncThemeToDisk() {
+    nmThemeDirty = true;
     const config = { theme: activeTheme, material: isMaterial, color: customColor };
     const jsonStr = JSON.stringify(config);
     const b64 = btoa(unescape(encodeURIComponent(jsonStr)));
     await exec(`mkdir -p ${NM_DATA} && echo "${b64}" | base64 -d > ${FILES.theme}.tmp && mv -f ${FILES.theme}.tmp ${FILES.theme}`);
-    localStorage.setItem('nm_theme_synced', 'true');
 }
 
 async function restoreThemeFromDisk() {
-    if (localStorage.getItem('nm_theme_synced') === 'true') return;
-
     try {
         const { stdout, errno } = await exec(`cat ${FILES.theme} 2>/dev/null`);
-        if (errno === 0 && stdout) {
-            const config = JSON.parse(stdout.trim());
-            let changed = false;
-            if (config.theme && config.theme !== activeTheme) { 
-                activeTheme = config.theme; localStorage.setItem('nm_theme', activeTheme); changed = true; 
-            }
-            if (config.material !== undefined && config.material !== isMaterial) { 
-                isMaterial = config.material; localStorage.setItem('nm_material', isMaterial); changed = true; 
-            }
-            if (config.color && config.color !== customColor) { 
-                customColor = config.color; localStorage.setItem('nm_custom_color', customColor); changed = true; 
-            }
-            if (changed) applyAppearance();
-        }
+        if (errno !== 0 || !stdout) return;
 
-        localStorage.setItem('nm_theme_synced', 'true');
-    } catch (e) { 
-        console.warn("No saved theme config found on disk.");
-        localStorage.setItem('nm_theme_synced', 'true');
-    }
+        let config;
+        try { config = JSON.parse(stdout.trim()); } catch { return; }
+
+        if (nmThemeDirty) return;
+
+        const diskTheme = (config.theme && config.theme in THEME_NAMES) ? config.theme : activeTheme;
+        const diskMaterial = config.material !== undefined ? Boolean(config.material) : isMaterial;
+        const diskColor = (typeof config.color === 'string' && /^#[0-9a-f]{6}$/i.test(config.color)) ? config.color : customColor;
+
+        if (diskTheme === activeTheme && diskMaterial === isMaterial && diskColor === customColor) return;
+
+        activeTheme = diskTheme;
+        isMaterial = diskMaterial;
+        customColor = diskColor;
+        localStorage.setItem('nm_theme', activeTheme);
+        localStorage.setItem('nm_material', isMaterial);
+        localStorage.setItem('nm_custom_color', customColor);
+
+        applyAppearance();
+        if (document.getElementById('theme-select-menu')) renderThemePicker();
+
+        const swMat = document.querySelector('#setting-material input');
+        const customColCard = document.getElementById('custom-color-card');
+        const colorIndicator = document.getElementById('custom-color-indicator');
+        const matCard = swMat?.closest('.segment-card');
+
+        if (swMat) swMat.checked = isMaterial;
+        if (customColCard) customColCard.style.display = isMaterial ? 'none' : '';
+        if (colorIndicator) colorIndicator.style.backgroundColor = customColor;
+        if (matCard) {
+            matCard.style.borderEndStartRadius = isMaterial ? 'var(--nm-segment-outer-corner)' : '';
+            matCard.style.borderEndEndRadius = isMaterial ? 'var(--nm-segment-outer-corner)' : '';
+        }
+    } catch (e) {}
 }
 
 const homeUI = {};
