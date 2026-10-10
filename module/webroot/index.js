@@ -289,22 +289,144 @@ function hexToHSL(hex) {
     return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
 }
 
+const _PALETTE_ROLES = {
+    light: {
+        primary:                ['primary', 40, 0.85],
+        onPrimary:              ['primary', 90, 0.40],
+        primaryContainer:       ['primary', 90, 0.55],
+        onPrimaryContainer:     ['primary', 10, 0.75],
+        secondaryContainer:     ['secondary', 35, 0.50],
+        onSecondaryContainer:   ['secondary', 90, 0.45],
+        surface:                ['neutral', 98, 0.40],
+        background:             ['neutral', 92, 0.80],
+        surfaceContainer:       ['neutral', 88, 0.40],
+        surfaceContainerHigh:   ['neutral', 90, 0.50],
+        surfaceContainerHighest:['neutral', 94, 0.60],
+        onSurface:              ['neutral', 10, 0.80],
+        onSurfaceVariant:       ['neutralVariant', 30, 0.16],
+        outline:                ['neutralVariant', 50, 0.20],
+        error:                  ['error', 40, 0.85],
+        onError:                ['error', 100, 0.00],
+        errorContainer:         ['error', 90, 0.55],
+        onErrorContainer:       ['error', 10, 0.75],
+    },
+    dark: {
+        primary:                ['primary', 80, 0.55],
+        onPrimary:              ['primary', 20, 0.65],
+        primaryContainer:       ['primary', 30, 0.65],
+        onPrimaryContainer:     ['primary', 80, 0.45],
+
+        secondaryContainer:     ['secondary', 24, 0.50],
+        onSecondaryContainer:   ['secondary', 80, 0.30],
+
+        surface:                ['neutral', 10, 0.60],
+        background:             ['neutral', 6, 0.90],
+        surfaceContainer:       ['neutral', 12, 0.60],
+        surfaceContainerHigh:   ['neutral', 17, 0.60],
+        surfaceContainerHighest:['neutral', 22, 0.60],
+        onSurface:              ['neutral', 80, 0.06],
+        onSurfaceVariant:       ['neutralVariant', 80, 0.16],
+        outline:                ['neutralVariant', 60, 0.20],
+
+        error:                  ['error', 75, 0.95],
+        onError:                ['error', 20, 0.65],
+        errorContainer:         ['error', 50, 0.95],
+        onErrorContainer:       ['error', 60, 0.45],
+    },
+};
+
+_PALETTE_ROLES.amoled = Object.assign({}, _PALETTE_ROLES.dark, {
+    surface:                ['neutral', 4, 0.02],
+    background:             ['neutral', 4, 0.02],
+    surfaceContainer:       ['neutral', 8, 0.08],
+    surfaceContainerHigh:   ['neutral', 12, 0.12],
+    surfaceContainerHighest:['neutral', 16, 0.16],
+});
+
+const _PALETTE_HUES = {
+    primary:        0,
+    secondary:     -4,
+    neutral:        8,
+    neutralVariant: 8,
+    error:          4,
+};
+
+const hslToHex = (h, s, l) => {
+    l /= 100;
+    const a = s * Math.min(l, 1 - l) / 100;
+    const f = n => {
+        const k = (n + h / 30) % 12;
+        const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+        return Math.round(255 * color).toString(16).padStart(2, '0');
+    };
+    return `#${f(0)}${f(8)}${f(4)}`;
+};
+
+function _tone(h, s, tone) {
+    const t = tone / 100;
+    const bell = Math.pow(Math.sin(Math.PI * t), 0.9);
+    const sat = Math.min(1, s * bell);
+    return hslToHex(h * 360, sat * 100, tone);
+}
+
+function computePalette(seedHex, scheme) {
+    const { h: seedH, s: seedS } = hexToHSL(seedHex);
+    const seedHue = seedH / 360;
+    const seedSat = seedS / 100;
+    const roles = _PALETTE_ROLES[scheme] || _PALETTE_ROLES.light;
+
+    const out = {};
+    for (const [role, [palette, tone, chroma]] of Object.entries(roles)) {
+        const h = (palette === 'error') ? _PALETTE_HUES.error / 360 : (seedHue + _PALETTE_HUES[palette] / 360 + 1) % 1;
+        const s = (palette === 'error') ? chroma : seedSat * chroma;
+        out['--md-sys-color-' + role.replace(/[A-Z]/g, c => '-' + c.toLowerCase())] =
+            _tone(h, s, tone);
+    }
+    return out;
+}
+
+let _nmSeed = null, _nmMqDark = null;
+function getSeedColor() {
+    if (!isMaterial) return customColor;
+    if (_nmSeed) return _nmSeed;
+    const v = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim();
+    _nmSeed = /^#[0-9a-f]{6}$/i.test(v) ? v : '#6750a4';
+    return _nmSeed;
+}
+
+function resolveScheme() {
+    if (activeTheme === 'light') return 'light';
+    if (activeTheme === 'dark')  return 'dark';
+    if (activeTheme === 'amoled') return 'amoled';
+    // 'system'
+    return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
 function applyAppearance() {
     const root = document.documentElement;
     root.setAttribute('data-theme', activeTheme);
     root.setAttribute('data-material', isMaterial);
 
-    if (!isMaterial) {
-        const { h, s, l } = hexToHSL(customColor);
-        root.style.setProperty('--nm-h', h);
-        root.style.setProperty('--nm-s', `${s}%`);
-        root.style.setProperty('--nm-l', `${l}%`);
+    const scheme = resolveScheme();
+    root.setAttribute('data-scheme', scheme);
+
+    const palette = computePalette(getSeedColor(), scheme);
+    for (const [name, value] of Object.entries(palette))
+        root.style.setProperty(name, value);
+
+    if (!isMaterial)
         root.style.setProperty('--nm-custom-color', customColor);
-    } else {
-        root.style.removeProperty('--nm-h');
-        root.style.removeProperty('--nm-s');
-        root.style.removeProperty('--nm-l');
+    else
         root.style.removeProperty('--nm-custom-color');
+
+    if (!_nmMqDark) {
+        _nmMqDark = matchMedia('(prefers-color-scheme: dark)');
+        _nmMqDark.addEventListener('change', () => {
+            if (activeTheme === 'system') {
+                _nmSeed = null;
+                applyAppearance();
+            }
+        });
     }
 }
 // Apply immediately to prevent flashes
@@ -1011,17 +1133,6 @@ async function addExclusion(uid, label, pkg) {
 
     await loadExclusions();
 }
-
-const hslToHex = (h, s, l) => {
-    l /= 100;
-    const a = s * Math.min(l, 1 - l) / 100;
-    const f = n => {
-        const k = (n + h / 30) % 12;
-        const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
-        return Math.round(255 * color).toString(16).padStart(2, '0');
-    };
-    return `#${f(0)}${f(8)}${f(4)}`;
-};
 
 // Options
 let optionsInitialized = false;
