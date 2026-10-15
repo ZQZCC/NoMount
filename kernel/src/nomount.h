@@ -58,6 +58,24 @@ struct nm_dir_ops {
     struct rcu_head rcu;
 };
 
+struct nm_dentry_ops {
+    struct dentry_operations fake_dops;
+    const struct dentry_operations *orig_dops;
+    unsigned long generation;
+    u64 view;
+    unsigned int sequence;
+    bool tagged;
+    struct rcu_head rcu;
+};
+
+struct nm_lookup_view {
+    struct dentry *parent;
+    struct name_snapshot snapshot;
+    struct qstr name;
+    unsigned long generation;
+    u64 view;
+};
+
 struct nm_sop {
     struct super_operations fake_sop; /* MUST be exactly at offset 0 */
     const struct super_operations *orig_sop;
