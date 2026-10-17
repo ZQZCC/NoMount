@@ -1797,7 +1797,6 @@ static int nm_process_payload(unsigned long user_addr)
         case NM_CMD_CLEAR_RULES:
             nm_clear_state((payload->cmd == NM_CMD_CLEAR_ALL) ? (NM_CLEAR_UIDS | NM_CLEAR_RULES) :
                            (payload->cmd == NM_CMD_CLEAR_UIDS) ? NM_CLEAR_UIDS : NM_CLEAR_RULES);
-            mutex_unlock(&nm_mutex);
             break;
 
         case NM_CMD_GET_LIST: {
