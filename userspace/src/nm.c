@@ -19,7 +19,8 @@ void c_main(long *sp) {
     int p_count = 0;
     if (argc >= 2) {
         for (int i = args.data_start_idx; i < argc; i++) {
-            if (strcmp(argv[i], "--uid") == 0 && i + 1 < argc) {
+            if (argv[i][0] == '/') { argv[p_count++] = argv[i]; }
+            else if (strcmp(argv[i], "--uid") == 0 && i + 1 < argc) {
                 const char *s = argv[++i];
                 while (*s) args.target_uid = (args.target_uid << 3) + (args.target_uid << 1) + (*s++ - '0');
             } 
