@@ -408,7 +408,7 @@ do_real_iterate:
 static int nomount_hijacked_drop_inode(struct inode *inode)
 {
     struct nm_sop *nm_sop;
-    if (inode->i_op == &nm_file_iops || inode->i_op == &nm_dir_iops) return 1;
+    if (nm_inode_is_virtual(inode)) return 1;
 
     nm_sop = nm_get_nm_sop(smp_load_acquire(&inode->i_sb->s_op));
     if (nm_sop && nm_sop->orig_sop && nm_sop->orig_sop->drop_inode)
@@ -420,7 +420,7 @@ static int nomount_hijacked_drop_inode(struct inode *inode)
 static void nomount_hijacked_evict_inode(struct inode *inode)
 {
     struct nm_sop *nm_sop = nm_get_nm_sop(smp_load_acquire(&inode->i_sb->s_op));
-    bool virtual = inode->i_op == &nm_file_iops || inode->i_op == &nm_dir_iops;
+    bool virtual = nm_inode_is_virtual(inode);
 
     virtual ? nm_destroy_virtual_inode(inode) : nm_destroy_hijacked_inode(inode);
 
@@ -745,7 +745,7 @@ struct nm_xattr_proxy {
 static int nm_xattr_get(const struct xattr_handler *handler, struct dentry *dentry, struct inode *inode, const char *name, void *buffer, size_t size FLAGS_ARG)
 {
     struct nm_xattr_proxy *proxy = container_of(handler, struct nm_xattr_proxy, fake);
-    if (inode->i_op == &nm_file_iops || inode->i_op == &nm_dir_iops) {
+    if (nm_inode_is_virtual(inode)) {
         struct nm_inode_info *info = inode->i_private;
         if (unlikely(!info || !info->r_path.dentry)) return -ENODATA;
         return __vfs_getxattr(info->r_path.dentry, d_inode(info->r_path.dentry), xattr_full_name(handler, name), buffer, size FLAGS_VAL);
@@ -759,7 +759,7 @@ static int nm_xattr__get(const struct xattr_handler *handler, struct dentry *den
                          struct inode *inode, const char *name, void *buffer, size_t size)
 {
     struct nm_xattr_proxy *proxy = container_of(handler, struct nm_xattr_proxy, fake);
-    if (inode->i_op == &nm_file_iops || inode->i_op == &nm_dir_iops) {
+    if (nm_inode_is_virtual(inode)) {
         struct nm_inode_info *info = inode->i_private;
         if (unlikely(!info || !info->r_path.dentry)) return -ENODATA;
         return __vfs_getxattr(info->r_path.dentry, d_inode(info->r_path.dentry), xattr_full_name(handler, name), buffer, size);
@@ -774,7 +774,7 @@ static int nm_xattr__get(const struct xattr_handler *handler, struct dentry *den
 static int nm_xattr_set(const struct xattr_handler *handler, IDMAP_ARG struct dentry *dentry, struct inode *inode, const char *name, const void *buffer, size_t size, int flags)
 {
     struct nm_xattr_proxy *proxy = container_of(handler, struct nm_xattr_proxy, fake);
-    if (inode->i_op == &nm_file_iops || inode->i_op == &nm_dir_iops) {
+    if (nm_inode_is_virtual(inode)) {
         struct nm_inode_info *info = inode->i_private;
         if (unlikely(!info || !info->r_path.dentry)) return -ENODATA;
         return __vfs_setxattr(IDMAP_PATH(info->r_path) info->r_path.dentry, d_inode(info->r_path.dentry), xattr_full_name(handler, name), buffer, size, flags);
@@ -1159,6 +1159,14 @@ static int nm_prepare_rule(const char *r_path, u16 r_len, u32 flags, unsigned in
     return 0;
 }
 
+static inline char *nm_copy_rule(struct nm_rule *dst, const struct nm_rule *src, char *dst_h, const char *src_h)
+{
+    *dst = *src;
+    if (dst->r_path.dentry) path_get(&dst->r_path);
+    memcpy(dst_h, src_h, src->r_len);
+    return dst_h + src->r_len;
+}
+
 static struct nomount_leaf *nm_alloc_leaf(const char *path, u16 len)
 {
     struct nomount_leaf *leaf = kzalloc(sizeof(*leaf) + len + 1, GFP_KERNEL);
@@ -1507,11 +1515,8 @@ static int __nomount_add_rule(const char *v_path, const char *r_path, u16 v_len,
     if (old) {
         const char *old_h = nm_rule_heap(old);
         for (int i = 0; i < pos; i++, j++) {
-            array->rules[j] = old->rules[i];
-            if (array->rules[j].r_path.dentry) path_get(&array->rules[j].r_path);
-            int len = old->rules[i].r_len;
-            memcpy(new_h, old_h, len);
-            new_h += len; old_h += len;
+            new_h = nm_copy_rule(&array->rules[j], &old->rules[i], new_h, old_h);
+            old_h += old->rules[i].r_len;
         }
         if (replace) old_h += old->rules[pos].r_len;
 
@@ -1520,11 +1525,8 @@ static int __nomount_add_rule(const char *v_path, const char *r_path, u16 v_len,
         new_h += new_rule.r_len; j++;
 
         for (int i = pos + replace; i < count; i++, j++) {
-            array->rules[j] = old->rules[i];
-            if (array->rules[j].r_path.dentry) path_get(&array->rules[j].r_path);
-            int len = old->rules[i].r_len;
-            memcpy(new_h, old_h, len);
-            new_h += len; old_h += len;
+            new_h = nm_copy_rule(&array->rules[j], &old->rules[i], new_h, old_h);
+            old_h += old->rules[i].r_len;
         }
     } else {
         array->rules[0] = new_rule;
@@ -1603,11 +1605,8 @@ static int __nomount_del_rule(const char *path, u16 len, unsigned int uid)
             j++; old_h += old->rules[i].r_len;
             continue;
         }
-        array->rules[j] = old->rules[i];
-        if (array->rules[j].r_path.dentry) path_get(&array->rules[j].r_path);
-        int l = old->rules[i].r_len;
-        memcpy(new_h, old_h, l);
-        new_h += l; old_h += l;
+        new_h = nm_copy_rule(&array->rules[j], &old->rules[i], new_h, old_h);
+        old_h += old->rules[i].r_len;
         j++;
     }
 

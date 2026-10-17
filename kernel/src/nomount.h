@@ -415,6 +415,10 @@ static inline struct nm_sop *nm_get_nm_sop(const struct super_operations *sop) {
     return NULL;
 }
 
+static inline bool nm_inode_is_virtual(struct inode *inode) {
+    return inode->i_op == &nm_file_iops || inode->i_op == &nm_dir_iops;
+}
+
 /* RCU read lock scope guard */
 static __always_inline void __nm_rcu_unlock(int *g) { (void)g; rcu_read_unlock(); }
 #define rcu_guard() rcu_read_lock(); int __attribute__((cleanup(__nm_rcu_unlock), unused)) __UNIQUE_ID(rcug)
