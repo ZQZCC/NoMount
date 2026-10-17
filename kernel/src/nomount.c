@@ -345,7 +345,7 @@ static struct dentry *nomount_hijacked_lookup(struct inode *dir, struct dentry *
         return ERR_PTR(-EOPNOTSUPP);
 
     if (special && !IS_ERR(res))
-        nm_mark_uncacheable(res ? res : dentry, special);
+        nm_mark_uncacheable(res ? res : dentry);
     return res;
 }
 
@@ -711,7 +711,7 @@ static struct dentry *nm_dir_lookup(struct inode *dir, struct dentry *dentry, un
     if (found) {
         res = nm_materialize_rule(dir, dentry, &rule_info);
         if (special && !IS_ERR(res))
-            nm_mark_uncacheable(res ? res : dentry, special);
+            nm_mark_uncacheable(res ? res : dentry);
         return res;
     }
 
@@ -725,7 +725,7 @@ static struct dentry *nm_dir_lookup(struct inode *dir, struct dentry *dentry, un
     if (r_dir->i_op->lookup) {
         res = r_dir->i_op->lookup(r_dir, dentry, flags);
         if (special && !IS_ERR(res))
-            nm_mark_uncacheable(res ? res : dentry, special);
+            nm_mark_uncacheable(res ? res : dentry);
         return res;
     }
     return ERR_PTR(-EOPNOTSUPP);
@@ -733,7 +733,7 @@ static struct dentry *nm_dir_lookup(struct inode *dir, struct dentry *dentry, un
 negative_dentry:
     d_add(dentry, NULL);
     if (special)
-        nm_mark_uncacheable(dentry, true);
+        nm_mark_uncacheable(dentry);
     return NULL;
 }
 
@@ -789,20 +789,13 @@ static int nm_d_revalidate(struct dentry *dentry, unsigned int flags)
 #endif
 {
     struct nm_dops *ops;
-    uid_t fsuid;
 
-    if (likely(!nm_per_uid_view_active()) || unlikely(!dentry->d_op || dentry->d_op->d_revalidate != nm_d_revalidate))
+    if (unlikely(!dentry->d_op || dentry->d_op->d_revalidate != nm_d_revalidate))
         return 1;
 
-    fsuid = current_fsuid().val;
     ops = container_of(dentry->d_op, struct nm_dops, fake);
-    if (ops->uid_dependent) {
-        if (likely(ops->view_uid == fsuid))
-            return 1;
-    } else {
-        if (likely(!nomount_is_uid_blocked(fsuid)))
-            return 1;
-    }
+    if (likely(ops->view_uid == current_fsuid().val))
+        return 1;
 
     if (flags & LOOKUP_RCU) return -ECHILD;
     d_drop(dentry);
@@ -821,7 +814,7 @@ static void nm_d_release(struct dentry *dentry)
     kfree_rcu(ops, rcu);
 }
 
-static inline void nm_mark_uncacheable(struct dentry *dentry, bool uid_dependent)
+static inline void nm_mark_uncacheable(struct dentry *dentry)
 {
     struct nm_dops *ops;
 
@@ -834,27 +827,25 @@ static inline void nm_mark_uncacheable(struct dentry *dentry, bool uid_dependent
     if (dentry->d_op && dentry->d_op->d_revalidate == nm_d_revalidate) {
         spin_unlock(&dentry->d_lock);
         kfree(ops);
-    } else {
-        ops->orig = dentry->d_op;
-        if (ops->orig) ops->fake = *ops->orig;
-        ops->fake.d_revalidate = nm_d_revalidate;
-        ops->fake.d_release    = nm_d_release;
-#ifndef DCACHE_DONTCACHE
-        ops->fake.d_delete     = nm_d_delete;
-        dentry->d_flags |= DCACHE_OP_DELETE;
-#endif
-        ops->uid_dependent = uid_dependent;
-        ops->view_uid      = uid_dependent ? current_fsuid().val : 0;
-        dentry->d_op = &ops->fake;
-        dentry->d_flags |= DCACHE_OP_REVALIDATE;
-        spin_unlock(&dentry->d_lock);
+        return;
     }
 
-#ifdef DCACHE_DONTCACHE
-    spin_lock(&dentry->d_lock);
-    dentry->d_flags |= DCACHE_DONTCACHE;
-    spin_unlock(&dentry->d_lock);
+    ops->orig = dentry->d_op;
+    if (ops->orig) ops->fake = *ops->orig;
+    smp_wmb();
+    ops->fake.d_revalidate = nm_d_revalidate;
+    ops->fake.d_release    = nm_d_release;
+#ifndef DCACHE_DONTCACHE
+    ops->fake.d_delete     = nm_d_delete;
+    dentry->d_flags |= DCACHE_OP_DELETE;
 #endif
+    ops->view_uid = current_fsuid().val;
+    dentry->d_op = &ops->fake;
+    dentry->d_flags |= DCACHE_OP_REVALIDATE;
+#ifdef DCACHE_DONTCACHE
+    dentry->d_flags |= DCACHE_DONTCACHE;
+#endif
+    spin_unlock(&dentry->d_lock);
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
