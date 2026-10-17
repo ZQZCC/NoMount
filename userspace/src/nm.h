@@ -229,7 +229,9 @@ static noinline void list_print_strn(struct nm_output *out, const char *s, unsig
         if (out->used == PATH_MAX) list_flush(out);
         unsigned long n = PATH_MAX - out->used;
         if (n > len) n = len;
-        for (unsigned long i = 0; i < n; i++) out->buffer[out->used++] = *s++;
+        char *p = out->buffer + out->used;
+        for (unsigned long i = 0; i < n; i++) *p++ = *s++;
+        out->used += n;
         len -= n;
     }
 }
