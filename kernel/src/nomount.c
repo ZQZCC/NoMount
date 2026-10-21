@@ -1200,7 +1200,7 @@ static int nm_inject_child_locked(struct nm_dir_node *dir_node, struct nm_leaf *
     leaf->parent_dir = dir_node;
     atomic_inc(&dir_node->refs);
     if (nm_rules_need_readdir(leaf, rcu_dereference_protected(leaf->rules, lockdep_is_held(&nm_mutex))))
-        WRITE_ONCE(dir_node->readdir_count, dir_node->readdir_count - 1);
+        WRITE_ONCE(dir_node->readdir_count, dir_node->readdir_count + 1);
     nm_publish_child_view_locked(dir_node, array);
     return 0;
 }
@@ -1229,7 +1229,7 @@ static struct nm_dir_node *nm_delete_child_locked(struct nm_leaf *leaf, bool cle
         }
     }
     nm_publish_child_view_locked(dir_node, array);
-    if (nm_rules_need_readdir(leaf, rcu_dereference_protected(leaf->rules, lockdep_is_held(&nm_mutex))))
+    if (array && nm_rules_need_readdir(leaf, rcu_dereference_protected(leaf->rules, lockdep_is_held(&nm_mutex))))
         WRITE_ONCE(dir_node->readdir_count, dir_node->readdir_count - 1);
     return dir_node;
 }
