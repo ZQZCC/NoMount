@@ -167,6 +167,17 @@ static noinline int strcmp(const char *s1, const char *s2) {
     return *(unsigned char *)s1 - *(unsigned char *)s2;
 }
 
+static noinline void parse_uid_range(const char *s, unsigned int *start, unsigned int *end) {
+    unsigned int first = 0, last = 0;
+    while (*s && *s != '-') first = (first << 3) + (first << 1) + (*s++ - '0');
+    if (*s == '-') s++;
+    if (*s) while (*s) last = (last << 3) + (last << 1) + (*s++ - '0');
+    else last = first;
+    if (last < first) { unsigned int t = first; first = last; last = t; }
+    *start = first;
+    *end = last;
+}
+
 static noinline void parse_arguments(long argc, char **argv, struct nm_args *parsed_args) {
     parsed_args->action = ACTION_NONE;
     parsed_args->data_start_idx = 2;

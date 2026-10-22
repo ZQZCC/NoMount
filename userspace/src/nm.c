@@ -32,27 +32,10 @@ void c_main(long *sp) {
                 if (strcmp(s, "all") == 0) {
                     args.target_uid = 0;
                     args.target_uid_end = 0xFFFFFFFFU;
-                } else {
-                    unsigned int start = 0, end = 0;
-                    while (*s && *s != '-') start = (start << 3) + (start << 1) + (*s++ - '0');
-                    if (*s == '-') s++;
-                    if (*s) while (*s) end = (end << 3) + (end << 1) + (*s++ - '0');
-                    else end = start;
-                    if (end < start) { unsigned int t = start; start = end; end = t; }
-                    args.target_uid = start;
-                    args.target_uid_end = end;
-                }
+                } else parse_uid_range(s, &args.target_uid, &args.target_uid_end);
             }
             else if (strcmp(argv[i], "--uid-excluded") == 0 && i + 1 < argc) {
-                const char *s = argv[++i];
-                unsigned int start = 0, end = 0;
-                while (*s && *s != '-') start = (start << 3) + (start << 1) + (*s++ - '0');
-                if (*s == '-') s++;
-                if (*s) while (*s) end = (end << 3) + (end << 1) + (*s++ - '0');
-                else end = start;
-                if (end < start) { unsigned int t = start; start = end; end = t; }
-                args.deny_start = start;
-                args.deny_end = end;
+                parse_uid_range(argv[++i], &args.deny_start, &args.deny_end);
             }
             else if (strcmp(argv[i], "--json") == 0 || strcmp(argv[i], "json") == 0) { args.is_json = 1; }
             else if (strcmp(argv[i], "--whiteout") == 0) { args.is_whiteout = 1; }
