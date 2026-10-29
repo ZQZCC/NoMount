@@ -300,24 +300,17 @@ static struct dentry *nm_materialize_rule(struct inode *dir, struct dentry *dent
         inode = iget5_locked(dir->i_sb, (unsigned long)rule_info->this_dir, nm_cached_inode_test, nm_cached_inode_set, &probe);
         if (!inode) goto out;
 
-        if (!nm_inode_is_new(inode)) {
-            res = d_splice_alias(inode, dentry);
-            if (!IS_ERR(res))
-                nm_hijack_dentry_ops(dir, res ? res : dentry, true);
-            goto out;
+        if (nm_inode_is_new(inode)) {
+            if (!(info = kmalloc(sizeof(*info), GFP_KERNEL))) { iget_failed(inode); goto out; }
+            *info = probe;
+            nm_init_prealloc_inode(inode, info, rule_info->v_ino);
+            unlock_new_inode(inode);
         }
-
-        if (!(info = kmalloc(sizeof(*info), GFP_KERNEL))) {
-            iget_failed(inode);
-            goto out;
-        }
-        *info = probe;
-        nm_init_prealloc_inode(inode, info, rule_info->v_ino);
-        unlock_new_inode(inode);
         res = d_splice_alias(inode, dentry);
         if (!IS_ERR(res))
             nm_hijack_dentry_ops(dir, res ? res : dentry, true);
-        return res;
+        if (info) return res;
+        goto out;
     }
 
     if (!(info = kmalloc(sizeof(*info), GFP_KERNEL))) goto out;
