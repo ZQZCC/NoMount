@@ -805,7 +805,7 @@ async function loadModule(modId) {
             -exec sh "${RULE_PATHS}" path "${modPath}" {} + 2>/dev/null \
             | xargs -0 -r -n 200 ${NM_BIN} rule add --whiteout
 
-        find -L $valid_dirs -name ".replace" \
+        find -L $valid_dirs \\( -type d -o -name ".replace" \\) \
             -exec sh "${RULE_PATHS}" opaque "${modPath}" {} + 2>/dev/null \
             | xargs -0 -r -n 200 ${NM_BIN} rule add --opaque
 

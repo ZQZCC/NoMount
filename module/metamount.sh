@@ -49,7 +49,7 @@ for mod_path in "$MODULES_DIR"/*; do
                 -exec sh "$MODDIR/rule-paths.sh" path "$mod_path" {} + 2>/dev/null \
                 | add_rule_and_log --whiteout
 
-            find -L "$mod_path/$partition" -name ".replace" \
+            find -L "$mod_path/$partition" \( -type d -o -name ".replace" \) \
                 -exec sh "$MODDIR/rule-paths.sh" opaque "$mod_path" {} + 2>/dev/null \
                 | add_rule_and_log --opaque
 
