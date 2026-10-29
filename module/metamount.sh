@@ -30,6 +30,8 @@ if ! _lock_fd 6 120; then
 fi
 
 echo "=== NoMount Injection | Started: $(date) ===" >> "$LOG_FILE"
+set -o pipefail
+status=0
 
 for mod_path in "$MODULES_DIR"/*; do
     [ -d "$mod_path" ] || continue
@@ -47,24 +49,28 @@ for mod_path in "$MODULES_DIR"/*; do
             echo "[INFO] Mounting module: $mod_name (/$partition)" >> "$LOG_FILE"
             find -L "$mod_path/$partition" \( -type d -o -type c -o -name ".replace" -o -name ".remove" \) \
                 -exec sh "$MODDIR/rule-paths.sh" path "$mod_path" {} + 2>/dev/null \
-                | xargs -0 -r -n 200 "$LOADER" rule add --whiteout >> "$LOG_FILE" 2>&1
+                | xargs -0 -r -n 200 "$LOADER" rule add --whiteout >> "$LOG_FILE" 2>&1 || status=1
 
             find -L "$mod_path/$partition" \( -type d -o -name ".replace" \) \
                 -exec sh "$MODDIR/rule-paths.sh" opaque "$mod_path" {} + 2>/dev/null \
-                | xargs -0 -r -n 200 "$LOADER" rule add --opaque >> "$LOG_FILE" 2>&1
+                | xargs -0 -r -n 200 "$LOADER" rule add --opaque >> "$LOG_FILE" 2>&1 || status=1
 
             find -L "$mod_path/$partition" \( -type f -o -type l \) ! -name ".replace" ! -name ".remove" \
                 -exec sh "$MODDIR/rule-paths.sh" pair "$mod_path" {} + 2>/dev/null \
-                | xargs -0 -r -n 200 "$LOADER" rule add >> "$LOG_FILE" 2>&1
+                | xargs -0 -r -n 200 "$LOADER" rule add >> "$LOG_FILE" 2>&1 || status=1
         fi
     done
 done
 
-echo "=== Injection Complete: $(date) ===" >> "$LOG_FILE"
-sed -i "s|^description=.*|description=$BASE_DESC|" "$PROP_FILE"
+if [ "$status" -eq 0 ]; then
+    echo "=== Injection Complete: $(date) ===" >> "$LOG_FILE"
+    sed -i "s|^description=.*|description=$BASE_DESC|" "$PROP_FILE"
+else
+    echo "[ERROR] Injection completed with errors." >> "$LOG_FILE"
+fi
 
 printf '\nCurrent files injected:\n' >> "$LOG_FILE"
 "$LOADER" rule list >> "$LOG_FILE"
 
 exec 6>&-
-exit 0
+exit "$status"
