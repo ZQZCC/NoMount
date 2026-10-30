@@ -55,6 +55,36 @@ try_load_ko() {
   return 1
 }
 
+load_ko_for_kernel() {
+  local kver="$1" akver="$2" arch_sfx="$3"
+  local exact="$MODPATH/lkm/nomount-${akver}-${kver}${arch_sfx}.ko"
+  local mod
+  local found=0
+
+  if [ -n "$akver" ] && [ -f "$exact" ]; then
+    found=1
+    ui_print "  [*] Trying: ${exact##*/}"
+    if try_load_ko "$exact"; then
+      mv "$exact" "$MODPATH/lkm/nomount.ko"
+      return 0
+    fi
+  fi
+
+  for mod in "$MODPATH"/lkm/nomount*-${kver}${arch_sfx}.ko; do
+    [ -f "$mod" ] || continue
+    [ "$mod" = "$exact" ] && continue
+    found=1
+    ui_print "  [*] Trying fallback: ${mod##*/}"
+    if try_load_ko "$mod"; then
+      mv "$mod" "$MODPATH/lkm/nomount.ko"
+      return 0
+    fi
+  done
+
+  [ "$found" = 0 ] && return 2
+  return 1
+}
+
 OLD_MODPATH="/data/adb/modules/nomount"
 KVER=$(uname -r | cut -d'.' -f1,2)
 AKVER=$(uname -r | grep -oE 'android[0-9]+')
@@ -96,35 +126,21 @@ elif [ "$LKM_RUNNING" = true ]; then
   ui_print "  [*] Active LKM detected."
   ui_print "  [*] Verifying new driver (no unload)..."
 
-  EXACT="$MODPATH/lkm/nomount-${AKVER}-${KVER}${ARCH_SFX}.ko"
-  CANDIDATE=""
+  load_ko_for_kernel "$KVER" "$AKVER" "$ARCH_SFX"
+  KO_RC=$?
 
-  if [ -n "$AKVER" ] && [ -f "$EXACT" ]; then
-    CANDIDATE="$EXACT"
-  else
-    for mod in "$MODPATH"/lkm/nomount*-${KVER}${ARCH_SFX}.ko; do
-      [ -f "$mod" ] || continue
-      CANDIDATE="$mod"
-      break
-    done
-  fi
-
-  if [ -n "$CANDIDATE" ]; then
-    ui_print "  [*] Testing candidate: ${CANDIDATE##*/}"
-    if try_load_ko "$CANDIDATE"; then
-      mv "$CANDIDATE" "$MODPATH/lkm/nomount.ko"
-      STAGED_FOR_REBOOT=true
-      ui_print "  [+] New driver verified and staged for the next reboot."
-    else
-      ui_print "  [!] New driver failed verification; keeping the running one."
-      if [ -f "$OLD_MODPATH/lkm/nomount.ko" ]; then
-        mkdir -p "$MODPATH/lkm"
-        cp "$OLD_MODPATH/lkm/nomount.ko" "$MODPATH/lkm/nomount.ko"
-        cp "$OLD_MODPATH/bin/nm" "$MODPATH/bin/nm" 2>/dev/null && set_perm "$MODPATH/bin/nm" 0 0 0755
-      fi
-    fi
-  else
+  if [ "$KO_RC" = 0 ]; then
+    STAGED_FOR_REBOOT=true
+    ui_print "  [+] New driver verified and staged for the next reboot."
+  elif [ "$KO_RC" = 2 ]; then
     ui_print "  [*] No new KO shipped; keeping the running driver as is."
+  else
+    ui_print "  [!] New driver failed verification; keeping the running one."
+    if [ -f "$OLD_MODPATH/lkm/nomount.ko" ]; then
+      mkdir -p "$MODPATH/lkm"
+      cp "$OLD_MODPATH/lkm/nomount.ko" "$MODPATH/lkm/nomount.ko"
+      cp "$OLD_MODPATH/bin/nm" "$MODPATH/bin/nm" 2>/dev/null && set_perm "$MODPATH/bin/nm" 0 0 0755
+    fi
   fi
 
   rm -f "$MODPATH"/lkm/nomount-*.ko
@@ -132,25 +148,8 @@ elif [ "$LKM_RUNNING" = true ]; then
 else
   ui_print "  [*] Built-in support not found. Attempting LKM injection..."
 
-  EXACT="$MODPATH/lkm/nomount-${AKVER}-${KVER}${ARCH_SFX}.ko"
-  CANDIDATE=""
-
-  if [ -n "$AKVER" ] && [ -f "$EXACT" ]; then
-    CANDIDATE="$EXACT"
-  else
-    for mod in "$MODPATH"/lkm/nomount*-${KVER}${ARCH_SFX}.ko; do
-      [ -f "$mod" ] || continue
-      CANDIDATE="$mod"
-      break
-    done
-  fi
-
-  if [ -n "$CANDIDATE" ]; then
-    ui_print "  [*] Trying: ${CANDIDATE##*/}"
-    if try_load_ko "$CANDIDATE"; then
-      mv "$CANDIDATE" "$MODPATH/lkm/nomount.ko"
-      LOADED_FRESH=true
-    fi
+  if load_ko_for_kernel "$KVER" "$AKVER" "$ARCH_SFX"; then
+    LOADED_FRESH=true
   fi
 
   if [ "$LOADED_FRESH" = false ] && [ -f "$OLD_MODPATH/lkm/nomount.ko" ]; then
