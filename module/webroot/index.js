@@ -260,13 +260,13 @@ async function loadHome() {
 
     const script = `
         uname -r; echo "|||"
-        getprop ro.product.vendor.model; [ -z "$(getprop ro.product.vendor.model)" ] && getprop ro.product.model; echo "|||"
+        model=$(getprop ro.product.vendor.model); [ -n "$model" ] || model=$(getprop ro.product.model); printf '%s\\n' "$model"; echo "|||"
         getprop ro.build.version.release; echo "|||"
         getprop ro.build.version.sdk; echo "|||"
         grep "^versionCode=" ${MOD_DIR}/nomount/module.prop | cut -d= -f2; echo "|||"
-        ${NM_BIN} version; echo "|||"
+        ${NM_BIN} version; nm_status=$?; echo "|||"
         ${NM_BIN} rule list --json; echo "|||"
-        if ${NM_BIN} version > /dev/null 2>&1; then lsmod | grep -q nomount && echo lkm || echo built-in; fi
+        if [ "$nm_status" -eq 0 ]; then lsmod | grep -q nomount && echo lkm || echo built-in; fi
     `;
 
     try {
