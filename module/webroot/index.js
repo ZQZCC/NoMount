@@ -263,7 +263,7 @@ async function loadHome() {
         model=$(getprop ro.product.vendor.model); [ -n "$model" ] || model=$(getprop ro.product.model); printf '%s\\n' "$model"; echo "|||"
         getprop ro.build.version.release; echo "|||"
         getprop ro.build.version.sdk; echo "|||"
-        grep "^versionCode=" ${MOD_DIR}/nomount/module.prop | cut -d= -f2; echo "|||"
+        sed -n 's/^versionCode=\\([^=]*\\).*/\\1/p' ${MOD_DIR}/nomount/module.prop; echo "|||"
         ${NM_BIN} version; nm_status=$?; echo "|||"
         ${NM_BIN} rule list --json; echo "|||"
         if [ "$nm_status" -eq 0 ]; then lsmod | grep -q nomount && echo lkm || echo built-in; fi
@@ -351,7 +351,7 @@ async function loadModules() {
                 [ ! -d "$mod" ] || [ "$mod" = "nomount" ] || [ ! -f "$mod/module.prop" ] && continue
                 has_injectable=0
                 for p in ${TARGET_PARTITIONS}; do [ -d "$mod/$p" ] && { [ -d "/$p" ] || [ -d "/system/$p" ]; } && has_injectable=1 && break; done
-                echo "$mod|$(grep "^name=" "$mod/module.prop" | head -n1 | cut -d= -f2-)|$([ -f "$mod/disable" ] && echo true || echo false)|$([ -f "$mod/skip_mount" ] && echo true || echo false)|$has_injectable"
+                echo "$mod|$(sed -n '/^name=/{s/^name=//;p;q;}' "$mod/module.prop")|$([ -f "$mod/disable" ] && echo true || echo false)|$([ -f "$mod/skip_mount" ] && echo true || echo false)|$has_injectable"
             done
         `;
 
