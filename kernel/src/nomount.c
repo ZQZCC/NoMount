@@ -278,6 +278,7 @@ static void nm_init_prealloc_inode(struct inode *inode, struct nm_inode_info *in
 {
     struct inode *r_inode = info->r_path.dentry ? d_backing_inode(info->r_path.dentry) : NULL;
 
+    info->r_file = NULL;
     inode->i_ino = v_ino;
     inode->i_private = info;
     inode->i_mode   = r_inode ? r_inode->i_mode & ~(S_ISUID | S_ISGID) : (S_IFDIR | 0755);
@@ -297,10 +298,6 @@ static void nm_init_prealloc_inode(struct inode *inode, struct nm_inode_info *in
         inode->i_fop = &nm_dir_fops;
 
     if (r_inode) {
-        if (S_ISREG(r_inode->i_mode) && r_inode->i_fop && r_inode->i_fop->read_iter) {
-            struct file *rf = dentry_open(&info->r_path, O_RDONLY | O_NONBLOCK, current_cred());
-            if (!IS_ERR(rf)) info->r_file = rf;
-        }
         nm_sync_inode_times(inode, r_inode);
         inode->i_mapping = r_inode->i_mapping;
     }
@@ -598,6 +595,8 @@ static int nm_open(struct inode *inode, struct file *file)
 {
     struct nm_inode_info *info = inode->i_private;
     struct file *real_file;
+    unsigned long magic;
+    bool cacheable;
 
     if (unlikely(!info)) return -ENODEV;
     if (unlikely(!info->r_path.dentry)) {
@@ -605,11 +604,10 @@ static int nm_open(struct inode *inode, struct file *file)
         return 0;
     }
 
-    if (likely(info->r_file != NULL && (file->f_flags & O_ACCMODE) == O_RDONLY &&
-           uid_eq(current_fsuid(), info->r_file->f_cred->fsuid) &&
-           current_cred()->security == info->r_file->f_cred->security)) {
-        real_file = get_file(info->r_file);
-        file->private_data = real_file;
+    magic = info->r_path.dentry->d_sb->s_magic;
+    cacheable = S_ISREG(inode->i_mode) && (file->f_flags & ~(O_LARGEFILE | O_CLOEXEC)) == O_RDONLY && (magic == EXT4_SUPER_MAGIC || magic == F2FS_SUPER_MAGIC);
+    if (cacheable && (real_file = smp_load_acquire(&info->r_file)) && real_file->f_cred == file->f_cred) {
+        file->private_data = get_file(real_file);
         return 0;
     }
 
@@ -617,6 +615,7 @@ static int nm_open(struct inode *inode, struct file *file)
     if (IS_ERR(real_file)) return PTR_ERR(real_file);
 
     file->private_data = real_file;
+    if (cacheable && !READ_ONCE(info->r_file) && cmpxchg(&info->r_file, NULL, real_file) == NULL) get_file(real_file);
     return 0;
 }
 
