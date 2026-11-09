@@ -173,7 +173,7 @@ else
 fi
 
 NM_REQUIRED_VER=22
-NM_CURRENT_VER=$("$MODPATH/bin/nm" version 2>/dev/null | head -1 | grep -oE '^[0-9]+' | head -1)
+NM_CURRENT_VER=$("$MODPATH/bin/nm" version 2>/dev/null | sed -n '1s/^\([0-9][0-9]*\).*/\1/p;1q')
 NM_CURRENT_VER=${NM_CURRENT_VER:-0}
 
 if [ "$NM_CURRENT_VER" -lt "$NM_REQUIRED_VER" ]; then

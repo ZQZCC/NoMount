@@ -39,7 +39,7 @@ for f do
             printf "/%s\0" "${v%/.remove}"
             continue
         fi
-        entries=$(find "$f" -mindepth 1 ! -name '.replace' ! -name '.remove' -print -quit 2>/dev/null) || exit 1
+        entries=$(find -H "$f" -mindepth 1 ! -name '.replace' ! -name '.remove' -print -quit 2>/dev/null) || exit 1
         if [ -n "$entries" ]; then
             if [ "$kind" = opaque ]; then printf "/%s\0%s\0" "$v" "$f"; fi
         elif [ "$kind" = path ]; then
