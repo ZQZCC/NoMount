@@ -32,27 +32,15 @@ mv "$MODPATH/bin/lkmloader-$ARCH_BIN" "$MODPATH/lkm/lkmloader"
 set_perm "$MODPATH/lkm/lkmloader" 0 0 0755
 rm -rf "$MODPATH"/bin/nm-* "$MODPATH"/bin/lkmloader-*
 
+MODDIR="$MODPATH"
+. "$MODDIR/common.sh"
+
 try_load_ko() {
   local output
-  local root_cmd=""
 
-  if command -v ksud >/dev/null 2>&1 && ksud -h 2>&1 | grep -qE '(^|[[:space:]])insmod([[:space:]]|$)'; then
-    root_cmd="ksud"
-  elif command -v apd >/dev/null 2>&1 && apd -h 2>&1 | grep -qE '(^|[[:space:]])insmod([[:space:]]|$)'; then
-    root_cmd="apd"
-  fi
-
-  if [ -n "$root_cmd" ]; then
-    if output=$("$root_cmd" insmod "$1" 2>&1) && "$MODPATH/bin/nm" version >/dev/null 2>&1; then
-      return 0
-    fi
-    if echo "$output" | grep -qi "File exists"; then
-      return 0
-    fi
-    ui_print "  [!] $root_cmd insmod failed: $output"
-  fi
-
-  if output=$("$MODPATH/lkm/lkmloader" "$1" 2>&1) && "$MODPATH/bin/nm" version >/dev/null 2>&1; then
+  if output=$({
+    [ -n "$ROOT_INSMOD" ] && "$ROOT_INSMOD" insmod "$1" || "$MODPATH/lkm/lkmloader" "$1"
+  } 2>&1) && "$MODPATH/bin/nm" version >/dev/null 2>&1; then
     return 0
   fi
 
@@ -60,7 +48,7 @@ try_load_ko() {
     return 0
   fi
 
-  ui_print "  [!] lkmloader failed: $output"
+  ui_print "  $output"
   return 1
 }
 
@@ -127,6 +115,8 @@ if [ "$API_RESPONDS" = true ]; then
   fi
 fi
 
+[ "$BUILTIN" = true ] || ROOT_INSMOD=$(find_root_insmod)
+
 if [ "$BUILTIN" = true ]; then
   ui_print "  [OK] NoMount is built into the kernel."
   rm -rf "$MODPATH/lkm"
@@ -190,7 +180,7 @@ else
 fi
 
 NM_REQUIRED_VER=22
-NM_CURRENT_VER=$("$MODPATH/bin/nm" version 2>/dev/null | head -1 | grep -oE '^[0-9]+' | head -1)
+NM_CURRENT_VER=$("$MODPATH/bin/nm" version 2>/dev/null | sed -n '1s/^\([0-9][0-9]*\).*/\1/p;1q')
 NM_CURRENT_VER=${NM_CURRENT_VER:-0}
 
 if [ "$NM_CURRENT_VER" -lt "$NM_REQUIRED_VER" ]; then
@@ -240,7 +230,6 @@ else
   ui_print "  [OK] System is ready for injection."
 fi
 
-NOMOUNT_DATA="/data/adb/nomount"
 mkdir -p "$NOMOUNT_DATA"
 rm -f "$NOMOUNT_DATA/.booting"
 

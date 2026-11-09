@@ -4,7 +4,7 @@ MODDIR=${0%/*}
 [ -d "$NOMOUNT_DATA" ] || mkdir -p "$NOMOUNT_DATA"
 
 if [ -f "$NOMOUNT_DATA/disable" ]; then
-    klog "SKIPPED initialization, Safe mode actived"
+    klog "SKIPPED initialization, safe mode active"
     exit 0
 fi
 

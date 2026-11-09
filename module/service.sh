@@ -14,7 +14,6 @@ DISABLE_FLAG="/data/adb/nomount/disable"
 if [ -f "$EXCLUSION_JSON" ]; then
     uids=$(grep -o '"uid":"[0-9]*"' "$EXCLUSION_JSON" | cut -d'"' -f4)
     if [ -n "$uids" ]; then
-        set -f
         "$NM_BIN" uid add $uids >/dev/null 2>&1 || klogerr "failed to apply excluded UIDs"
     fi
 fi

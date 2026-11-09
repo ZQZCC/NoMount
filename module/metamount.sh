@@ -26,7 +26,6 @@ fi
 trap 'exit 1' INT TERM
 
 klog "Injection started"
-set -o pipefail
 status=0
 
 for mod_path in "$MODULES_DIR"/*; do
