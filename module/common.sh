@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# Shared helpers for NoMount post-fs-data.sh and metamount.sh
+# Shared helpers for NoMount scripts
 
 NOMOUNT_DATA="/data/adb/nomount"
 LOG_FILE="$NOMOUNT_DATA/nomount.log"
@@ -14,10 +14,19 @@ disable_module() {
     rm -f "$BOOT_SEMAPHORE"
 }
 
+find_root_insmod() {
+    local cmd
+    for cmd in ksud apd; do
+        if command -v "$cmd" >/dev/null 2>&1 && "$cmd" -h 2>&1 | grep -qE '(^|[[:space:]])insmod([[:space:]]|$)'; then
+            echo "$cmd"
+            return
+        fi
+    done
+}
+
 load_ko() {
-    local root_cmd=""
-    if command -v ksud >/dev/null 2>&1 && ksud -h 2>&1 | grep -qE '(^|[[:space:]])insmod([[:space:]]|$)'; then root_cmd="ksud"
-    elif command -v apd >/dev/null 2>&1 && apd -h 2>&1 | grep -qE '(^|[[:space:]])insmod([[:space:]]|$)'; then root_cmd="apd"; fi
+    local root_cmd
+    root_cmd=$(find_root_insmod)
 
     if [ -n "$root_cmd" ]; then
         if "$root_cmd" insmod "$1" >> "$LOG_FILE" 2>&1 && "$LOADER" version >/dev/null 2>&1; then

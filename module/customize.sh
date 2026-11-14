@@ -32,10 +32,16 @@ mv "$MODPATH/bin/lkmloader-$ARCH_BIN" "$MODPATH/lkm/lkmloader"
 set_perm "$MODPATH/lkm/lkmloader" 0 0 0755
 rm -rf "$MODPATH"/bin/nm-* "$MODPATH"/bin/lkmloader-*
 
-try_load_ko() {
-  local output
+MODDIR="$MODPATH"
+. "$MODDIR/common.sh"
 
-  if output=$("$MODPATH/lkm/lkmloader" "$1" 2>&1) && "$MODPATH/bin/nm" version >/dev/null 2>&1; then
+try_load_ko() {
+  local output root_cmd
+  root_cmd=$(find_root_insmod)
+
+  if output=$({
+    [ -n "$root_cmd" ] && "$root_cmd" insmod "$1" || "$MODPATH/lkm/lkmloader" "$1"
+  } 2>&1) && "$MODPATH/bin/nm" version >/dev/null 2>&1; then
     return 0
   fi
 
@@ -223,7 +229,6 @@ else
   ui_print "  [OK] System is ready for injection."
 fi
 
-NOMOUNT_DATA="/data/adb/nomount"
 mkdir -p "$NOMOUNT_DATA"
 rm -f "$NOMOUNT_DATA/.booting"
 
