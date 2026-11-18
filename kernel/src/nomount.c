@@ -34,7 +34,7 @@ static __always_inline bool nm_is_uid_blocked(uid_t target_uid)
 
 static __always_inline bool nm_child_matches(struct nm_leaf *leaf, const char *name, size_t len)
 {
-    if (unlikely(!len || leaf->child_len != len)) return false;
+    if (unlikely(leaf->child_len != len)) return false;
     const char *child_name = nm_get_child_name(leaf);
     return child_name[0] == name[0] && child_name[len - 1] == name[len - 1] && !memcmp(child_name, name, len);
 }
@@ -292,14 +292,12 @@ static inline void nm_emit_virtual_children(struct dir_context *ctx, struct nm_d
 			cur_frag = nm_child_frag(nm_entries(array)[id].hash);
 			has_more = true;
 			if (rule && !(rule->flags & NM_FLAG_WHITEOUT) && (!native_view || nm_rule_needs_readdir(leaf, rule))) {
+				struct inode *r_inode = rule->r_path.dentry ? d_backing_inode(rule->r_path.dentry) : NULL;
 				name_len = leaf->child_len;
-				if (likely(name_len <= NAME_MAX)) {
-					struct inode *r_inode = rule->r_path.dentry ? d_backing_inode(rule->r_path.dentry) : NULL;
-					memcpy(name_buf, nm_get_child_name(leaf), name_len);
-					v_ino = leaf->v_ino;
-					d_type = r_inode ? nm_mode_to_dtype(r_inode->i_mode) : DT_DIR;
-					do_emit = true;
-				}
+				memcpy(name_buf, nm_get_child_name(leaf), name_len);
+				v_ino = leaf->v_ino;
+				d_type = r_inode ? nm_mode_to_dtype(r_inode->i_mode) : DT_DIR;
+				do_emit = true;
 			}
 			if (id + 1 < (u32)array->count) next_frag = nm_child_frag(nm_entries(array)[id + 1].hash);
 		}
