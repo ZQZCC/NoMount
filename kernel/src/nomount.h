@@ -41,7 +41,7 @@
 #define nm_warn(fmt, ...) printk(KERN_WARNING "NoMount: [WARN] " fmt, ##__VA_ARGS__)
 #define nm_err(fmt, ...)  printk(KERN_ERR "NoMount: [ERROR] " fmt, ##__VA_ARGS__)
 
-#define NM_LEAF_HT_BITS 10
+#define NM_LEAF_HT_BITS 6
 static struct nm_uid_array __rcu *nm_uids = NULL;
 static DEFINE_HASHTABLE(nm_leaves_ht, NM_LEAF_HT_BITS);
 static DEFINE_MUTEX(nm_mutex);
