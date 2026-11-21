@@ -1632,20 +1632,20 @@ static struct nm_rule_array *nm_alloc_rule_array(int count)
 static int nm_prepare_rule(const char *r_path, u32 flags, unsigned int uid, unsigned int uid_end,
                            unsigned int deny_start, unsigned int deny_end, struct nm_rule *out)
 {
-    if (flags & ~(NM_FLAG_VIRTUAL_DIR | NM_FLAG_WHITEOUT | NM_FLAG_OPAQUE)) return -EINVAL;
+    if (flags & ~(NM_FLAG_VIRTUAL_DIR | NM_FLAG_WHITEOUT | NM_FLAG_OPAQUE | NM_FLAG_NOFOLLOW)) return -EINVAL;
     if ((flags & NM_FLAG_WHITEOUT) && (flags & (NM_FLAG_VIRTUAL_DIR | NM_FLAG_OPAQUE))) return -EINVAL;
     bool backed = !(flags & (NM_FLAG_WHITEOUT | NM_FLAG_VIRTUAL_DIR));
     if (backed && !r_path) return -EINVAL;
     if (flags & NM_FLAG_VIRTUAL_DIR) flags |= NM_FLAG_IS_DIR;
 
     memset(out, 0, sizeof(*out));
-    out->flags = flags;
+    out->flags = flags & ~NM_FLAG_NOFOLLOW;
     out->target_uid = uid;
     out->uid_end = uid_end;
     out->deny_start = deny_start;
     out->deny_end = deny_end;
     if (backed) {
-        int err = kern_path(r_path, LOOKUP_FOLLOW, &out->r_path);
+        int err = kern_path(r_path, flags & NM_FLAG_NOFOLLOW ? 0 : LOOKUP_FOLLOW, &out->r_path);
         if (err) return err;
         struct inode *inode = d_backing_inode(out->r_path.dentry);
         if (nm_inode_is_virtual(inode) || (!S_ISDIR(inode->i_mode) && (flags & NM_FLAG_OPAQUE))) {
@@ -2146,6 +2146,7 @@ static int nm_process_payload(unsigned long user_addr)
 
     switch (payload->cmd) {
         case NM_CMD_GET_VERSION:
+            payload->arg1 = NM_FLAG_NOFOLLOW;
             memcpy(payload->buffer, NOMOUNT_VERSION, (payload->data_size = strlen(NOMOUNT_VERSION)));
             break;
 

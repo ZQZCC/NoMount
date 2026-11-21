@@ -19,7 +19,7 @@
 #ifndef NAME_MAX
 #define NAME_MAX  255
 #endif
-enum { NM_FLAG_VIRTUAL_DIR = 2, NM_FLAG_WHITEOUT = 4, NM_FLAG_OPAQUE = 8 };
+enum { NM_FLAG_VIRTUAL_DIR = 2, NM_FLAG_WHITEOUT = 4, NM_FLAG_OPAQUE = 8, NM_FLAG_NOFOLLOW = 16 };
 
 enum {
     NM_CMD_UNSPEC = 0,
@@ -144,6 +144,7 @@ struct nm_walk {
     size_t root_len;
     int has_injectable;
     int error;
+    int keep_links;
     char path[PATH_MAX];
 };
 
@@ -699,6 +700,21 @@ static int nm_directory_rule(int fd, int check_contents) {
     return entries ? NM_FLAG_OPAQUE : NM_FLAG_WHITEOUT;
 }
 
+static int nm_is_marker(const char *name) {
+    return !strcmp(name, ".replace") || !strcmp(name, ".remove");
+}
+
+static noinline int nm_system_link(int fd, const char *name) {
+    char target[PATH_MAX];
+    ssize_t n = readlinkat(fd, name, target, sizeof(target));
+    if (n <= 0 || n == (ssize_t)sizeof(target) || target[0] != '/') return 0;
+    const char *part = target + 1, *end = target + n;
+    while (part < end && *part == '/') part++;
+    const char *slash = memchr(part, '/', end - part);
+    size_t len = (slash ? slash : end) - part;
+    return (len == 6 && !memcmp(part, "system", 6)) || nm_is_partition(part, len);
+}
+
 static int nm_walk_module(struct nm_walk *ctx, int parent_fd, const char *name,
                            unsigned char type, const struct nm_ancestor *parent) {
     struct stat st;
@@ -708,12 +724,17 @@ static int nm_walk_module(struct nm_walk *ctx, int parent_fd, const char *name,
         type = st.st_mode >> 12;
     }
     if (type == DT_LNK) {
+        if (ctx->keep_links && parent && strchr(nm_vpath(ctx) + 1, '/') &&
+            !nm_is_marker(name) && nm_system_link(parent_fd, name)) {
+            nm_emit(ctx, NM_FLAG_NOFOLLOW);
+            return 0;
+        }
         if (fstatat(parent_fd, name, &st, 0)) return errno == ENOENT || errno == ENOTDIR ? 0 : -errno;
         type = st.st_mode >> 12;
         if (ctx->catalog && (rc = nm_collect_mapping(ctx, type == DT_DIR ? NM_FLAG_VIRTUAL_DIR : 0))) return rc;
     }
     if (type != DT_DIR) {
-        if (!strcmp(name, ".replace") || !strcmp(name, ".remove")) return 0;
+        if (nm_is_marker(name)) return 0;
         if (type == DT_CHR) nm_emit(ctx, NM_FLAG_WHITEOUT);
         else if (type == DT_REG && !ctx->catalog) nm_emit(ctx, 0);
         return 0;
@@ -773,6 +794,9 @@ static int cmd_module_load_or_unload(struct nm_workspace *ws, struct nm_args *ar
     else if (!realpath(args->mod_path, ctx.path)) rc = -errno;
     else if ((rc = nm_dir_exists(ctx.path)) > 0) {
         ctx.root_len = strlen(ctx.path);
+        ctx.payload->cmd = NM_CMD_GET_VERSION;
+        ctx.payload->arg1 = ctx.payload->data_size = 0;
+        ctx.keep_links = !nm_send_payload(ctx.payload) && (ctx.payload->arg1 & NM_FLAG_NOFOLLOW);
         ctx.payload->cmd = is_load ? NM_CMD_ADD_RULE : NM_CMD_DEL_RULE;
         ctx.payload->arg1 = ctx.payload->data_size = 0;
         rc = nm_walk_partitions(&ctx, args->mod_targets ? args->mod_targets : NM_DEFAULT_TARGETS);

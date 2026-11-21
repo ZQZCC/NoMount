@@ -29,6 +29,7 @@
 #define NM_FLAG_VIRTUAL_DIR (1 << 1)
 #define NM_FLAG_WHITEOUT    (1 << 2)
 #define NM_FLAG_OPAQUE      (1 << 3)
+#define NM_FLAG_NOFOLLOW    (1 << 4)
 
 /* flags for cleanup */
 #define NM_CLEAR_UIDS  (1 << 0)
