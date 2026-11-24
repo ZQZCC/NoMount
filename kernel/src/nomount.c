@@ -174,16 +174,6 @@ static int nm_rebind_path(struct nm_rule_info *rule_info)
     return 0;
 }
 
-static void nm_refresh_binding(struct inode *inode, const struct path *path)
-{
-    struct nm_inode_info *info = READ_ONCE(inode->i_private);
-    struct dentry *old;
-    if (!info || !path->dentry || (old = READ_ONCE(info->r_path.dentry)) == path->dentry) return;
-    path_get(path);
-    if (cmpxchg(&info->r_path.dentry, old, path->dentry) == old) dput(old);
-    else path_put(path);
-}
-
 static void nm_dir_rcu_free(struct rcu_head *head)
 {
     struct nm_dir_node *dir = container_of(head, struct nm_dir_node, rcu);
@@ -434,8 +424,6 @@ static struct dentry *nm_materialize_rule(struct inode *dir, struct dentry *dent
         *info = probe;
         nm_init_prealloc_inode(inode, info, rule_info->v_ino);
         unlock_new_inode(inode);
-    } else {
-        nm_refresh_binding(inode, &rule_info->r_path);
     }
     res = d_splice_alias(inode, dentry);
     if (!IS_ERR(res))
@@ -978,9 +966,8 @@ static struct dentry *nm_dir_lookup(struct inode *dir, struct dentry *dentry, un
             .key = (unsigned long)backing,
             .backing_child = true,
         };
-        rule_info.r_path.dentry = backing;
         path_get(&rule_info.r_path);
-        dput(backing);
+        rule_info.r_path.dentry = backing;
         return nm_materialize_rule(dir, dentry, &rule_info, flags);
     }
 
