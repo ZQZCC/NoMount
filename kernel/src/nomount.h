@@ -78,7 +78,6 @@ struct nm_sop {
 struct nm_inode_info {
     struct path r_path;
     union { struct nm_dir_node *dir_node; struct nm_leaf *leaf; const void *node; };
-    struct file *r_file;
     bool opaque;
     bool backing_child;
     struct rcu_head rcu;

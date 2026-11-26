@@ -194,7 +194,6 @@ static inline void nm_destroy_virtual_inode(struct inode *inode)
     if (!info) return;
 
     WRITE_ONCE(inode->i_private, NULL);
-    if (info->r_file) fput(info->r_file);
     if (inode->i_op == &nm_file_iops) nm_leaf_put(info->leaf);
     else nm_dir_put(info->dir_node);
     if (info->r_path.dentry) path_put(&info->r_path);
@@ -668,9 +667,25 @@ static inline void nm_sync_inode_size(struct inode *v_inode, struct inode *r_ino
         i_size_write(v_inode, size);
 }
 
+static bool nm_can_read_direct(struct inode *inode, struct file *file, struct inode *r_inode)
+{
+    if (!S_ISREG(inode->i_mode) || (file->f_flags & (O_ACCMODE | O_DIRECT | O_TRUNC)) != O_RDONLY || IS_ENCRYPTED(r_inode))
+        return false;
+#ifdef IS_VERITY
+    if (IS_VERITY(r_inode)) return false;
+#endif
+    unsigned long m = r_inode->i_sb->s_magic;
+    return m == EXT4_SUPER_MAGIC || m == F2FS_SUPER_MAGIC || m == SQUASHFS_MAGIC
+#if defined(EROFS_SUPER_MAGIC_V1) && BITS_PER_LONG == 64
+        || m == EROFS_SUPER_MAGIC_V1
+#endif
+        ;
+}
+
 static int nm_open(struct inode *inode, struct file *file)
 {
     struct nm_inode_info *info = inode->i_private;
+    struct inode *r_inode;
     struct file *real_file;
 
     if (unlikely(!info)) return -ENODEV;
@@ -679,10 +694,10 @@ static int nm_open(struct inode *inode, struct file *file)
         return 0;
     }
 
-    bool readonly = (file->f_flags & ~(O_LARGEFILE | O_CLOEXEC)) == O_RDONLY;
-    if (readonly && (real_file = smp_load_acquire(&info->r_file)) && real_file->f_cred == file->f_cred && !nm_backing_gone(info->r_path.dentry)) {
-        if (!S_ISDIR(inode->i_mode)) nm_sync_inode_size(inode, file_inode(real_file));
-        file->private_data = real_file;
+    r_inode = d_backing_inode(info->r_path.dentry);
+    if (r_inode && r_inode->i_nlink && nm_can_read_direct(inode, file, r_inode)) {
+        nm_sync_inode_size(inode, r_inode);
+        file->private_data = NULL;
         return 0;
     }
 
@@ -691,18 +706,12 @@ static int nm_open(struct inode *inode, struct file *file)
 
     if (!S_ISDIR(inode->i_mode)) nm_sync_inode_size(inode, file_inode(real_file));
     file->private_data = real_file;
-    if (readonly && !READ_ONCE(info->r_file) && S_ISREG(inode->i_mode)) {
-        unsigned long magic = info->r_path.dentry->d_sb->s_magic;
-        if (magic == EXT4_SUPER_MAGIC || magic == F2FS_SUPER_MAGIC) cmpxchg(&info->r_file, NULL, real_file);
-    }
     return 0;
 }
 
 static int nm_release(struct inode *inode, struct file *file)
 {
-    struct nm_inode_info *info = READ_ONCE(inode->i_private);
-    struct file *real_file = file->private_data;
-    if (real_file && info && real_file != READ_ONCE(info->r_file)) fput(real_file);
+    if (file->private_data) fput(file->private_data);
     file->private_data = NULL;
     return 0;
 }
@@ -710,17 +719,19 @@ static int nm_release(struct inode *inode, struct file *file)
 static loff_t nm_llseek(struct file *file, loff_t offset, int whence)
 {
     struct file *real_file = file->private_data;
-    loff_t pos;
-
-    if (!real_file) return -EINVAL;
+    struct inode *r_inode = real_file ? file_inode(real_file) : file->f_mapping->host;
+    loff_t pos, size;
 
     switch (whence) {
     case SEEK_SET: pos = offset; break;
     case SEEK_CUR: pos = file->f_pos + offset; break;
-    case SEEK_END: pos = i_size_read(file_inode(real_file)) + offset; break;
+    case SEEK_END: pos = i_size_read(r_inode) + offset; break;
     case SEEK_DATA:
     case SEEK_HOLE:
-        if ((pos = vfs_llseek(real_file, offset, whence)) < 0) return pos;
+        if (real_file) { if ((pos = vfs_llseek(real_file, offset, whence)) < 0) return pos; break; }
+        size = i_size_read(r_inode);
+        if (offset < 0 || offset >= size) return -ENXIO;
+        pos = (whence == SEEK_DATA) ? offset : size;
         break;
     default: return -EINVAL;
     }
@@ -734,7 +745,12 @@ static ssize_t nm_read_iter(struct kiocb *iocb, struct iov_iter *to)
     struct file *file = iocb->ki_filp;
     struct file *real_file = file->private_data;
     ssize_t ret;
-    if (!real_file || !real_file->f_op->read_iter) return -EINVAL;
+
+    if (!real_file) {
+        if (unlikely(iocb->ki_flags & IOCB_DIRECT)) return -EINVAL;
+        return generic_file_read_iter(iocb, to);
+    }
+    if (!real_file->f_op->read_iter) return -EINVAL;
     if (unlikely(!is_sync_kiocb(iocb) && (iocb->ki_flags & IOCB_DIRECT))) return -EOPNOTSUPP;
 
     iocb->ki_filp = real_file;
@@ -806,9 +822,20 @@ static long nm_compat_ioctl(struct file *file, unsigned int cmd, unsigned long a
 static ssize_t nm_splice_read(struct file *in, loff_t *ppos, struct pipe_inode_info *pipe,
                               size_t len, unsigned int flags)
 {
-    struct file *real_file = in->private_data;
-    if (!real_file || !real_file->f_op->splice_read) return -EINVAL;
-    return real_file->f_op->splice_read(real_file, ppos, pipe, len, flags);
+    struct file *real_file = in->private_data, *tmp = NULL;
+    ssize_t ret = -EINVAL;
+
+    if (!real_file) {
+        struct nm_inode_info *info = READ_ONCE(file_inode(in)->i_private);
+        if (!info || !info->r_path.dentry) return -EINVAL;
+        tmp = dentry_open(&info->r_path, O_RDONLY, in->f_cred);
+        if (IS_ERR(tmp)) return PTR_ERR(tmp);
+        real_file = tmp;
+    }
+    if (real_file->f_op->splice_read)
+        ret = real_file->f_op->splice_read(real_file, ppos, pipe, len, flags);
+    if (tmp) fput(tmp);
+    return ret;
 }
 
 static ssize_t nm_splice_write(struct pipe_inode_info *pipe, struct file *out,
@@ -822,7 +849,8 @@ static ssize_t nm_splice_write(struct pipe_inode_info *pipe, struct file *out,
 static int nm_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 {
     struct file *real_file = file->private_data;
-    if (!real_file || !real_file->f_op->fsync) return -EINVAL;
+    if (!real_file) return 0;
+    if (!real_file->f_op->fsync) return -EINVAL;
     return real_file->f_op->fsync(real_file, start, end, datasync);
 }
 
