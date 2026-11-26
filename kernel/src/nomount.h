@@ -394,7 +394,7 @@ struct nm_del_hdr {
     hlist_for_each_entry(dentry, &(inode)->i_dentry, d_u.d_alias)
 #endif
 
-#ifndef DCACHE_DONTCACHE
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 7, 0) && !defined(DCACHE_DONTCACHE)
 # define DCACHE_DONTCACHE 0
 #endif
 

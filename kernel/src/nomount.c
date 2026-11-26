@@ -1826,11 +1826,16 @@ static void nm_retire_leaf_locked(struct nm_leaf *leaf)
 
 static void nm_prepare_native_file(struct nm_leaf *leaf, struct nm_dir_node *dir_node, const struct path *parent, const char *name)
 {
+    bool immutable_fs = true;
+
     switch (parent->dentry->d_sb->s_magic) {
 #if defined(EROFS_SUPER_MAGIC_V1) && BITS_PER_LONG == 64
     case EROFS_SUPER_MAGIC_V1:
 #endif
     case SQUASHFS_MAGIC:
+        break;
+    case EXT4_SUPER_MAGIC:
+        immutable_fs = false;
         break;
     default:
         return;
@@ -1844,7 +1849,7 @@ static void nm_prepare_native_file(struct nm_leaf *leaf, struct nm_dir_node *dir
     struct inode *inode = d_backing_inode(path.dentry);
     if (path.dentry->d_parent == parent->dentry && S_ISREG(inode->i_mode) && inode->i_nlink == 1) {
         leaf->v_ino = inode->i_ino;
-        leaf->native_file = true;
+        if (immutable_fs) leaf->native_file = true;
     }
     path_put(&path);
 }
