@@ -2,12 +2,10 @@
 #define _LINUX_NOMOUNT_H
 
 #include <linux/types.h>
-#include <linux/idr.h>
 #include <linux/list.h>
 #include <linux/hashtable.h>
 #include <linux/rcupdate.h>
 #include <linux/workqueue.h>
-#include <linux/rwsem.h>
 #include <linux/atomic.h>
 #include <linux/file.h>
 #include <linux/magic.h>
@@ -35,9 +33,12 @@
 #define NM_CLEAR_EXIT  (1 << 2)
 
 /* logs */
+#ifdef DEBUG
 #define nm_debug(fmt, ...) printk(KERN_DEBUG "NoMount: [DEBUG] " fmt, ##__VA_ARGS__)
+#else
+#define nm_debug(fmt, ...) no_printk(KERN_DEBUG "NoMount: [DEBUG] " fmt, ##__VA_ARGS__)
+#endif
 #define nm_info(fmt, ...) printk(KERN_INFO "NoMount: " fmt, ##__VA_ARGS__)
-#define nm_warn(fmt, ...) printk(KERN_WARNING "NoMount: [WARN] " fmt, ##__VA_ARGS__)
 #define nm_err(fmt, ...)  printk(KERN_ERR "NoMount: [ERROR] " fmt, ##__VA_ARGS__)
 
 #define NM_LEAF_HT_BITS 6

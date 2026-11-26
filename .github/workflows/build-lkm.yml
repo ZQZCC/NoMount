@@ -136,7 +136,7 @@ jobs:
         run: |
           set -euo pipefail
           install -Dm644 "$SRC_DIR/nomount.ko" "$ARTIFACT"
-          llvm-strip --strip-unneeded -R .BTF "$ARTIFACT"
+          llvm-strip --strip-unneeded -R .BTF -R .comment -R .note.GNU-stack "$ARTIFACT"
           ls -lh "$ARTIFACT"
 
       - name: Upload module

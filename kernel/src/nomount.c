@@ -1,6 +1,5 @@
 #include <linux/init.h>
 #include <linux/fs.h>
-#include <linux/file.h>
 #include <linux/namei.h>
 #include <linux/cred.h>
 #include <linux/xattr.h>
