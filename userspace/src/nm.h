@@ -314,18 +314,9 @@ static noinline void parse_arguments(long argc, char **argv, struct nm_args *par
             else if (strcmp(a, "--json") == 0) parsed_args->is_json = 1;
             else if (!parsed_args->mod_path) parsed_args->mod_path = a;
         }
+    } else if (strcmp(c1, "version") == 0 || strcmp(c1, "v") == 0 || strcmp(c1, "-v") == 0) {
+        parsed_args->action = ACTION_VERSION;
     }
-
-    /* Legacy Commands */
-    else if (strcmp(c1, "add") == 0 || strcmp(c1, "a") == 0) { parsed_args->action = ACTION_RULE_ADD; }
-    else if (strcmp(c1, "w") == 0 || strcmp(c1, "whiteout") == 0) { parsed_args->action = ACTION_RULE_ADD; parsed_args->is_whiteout = 1; }
-    else if (strcmp(c1, "del") == 0 || strcmp(c1, "d") == 0) { parsed_args->action = ACTION_RULE_DEL; }
-    else if (strcmp(c1, "block") == 0 || strcmp(c1, "b") == 0) { parsed_args->action = ACTION_UID_ADD; }
-    else if (strcmp(c1, "unblock") == 0 || strcmp(c1, "u") == 0) { parsed_args->action = ACTION_UID_DEL; }
-    else if (strcmp(c1, "list") == 0 || strcmp(c1, "l") == 0) {
-        if (argc >= 3 && strcmp(argv[2], "uid") == 0) { parsed_args->action = ACTION_UID_LIST; parsed_args->data_start_idx = 3; }
-        else { parsed_args->action = ACTION_RULE_LIST; }
-    } else if (strcmp(c1, "version") == 0 || strcmp(c1, "v") == 0 || strcmp(c1, "-v") == 0) { parsed_args->action = ACTION_VERSION; }
 }
 
 static noinline void write_strn(int fd, const char *s, size_t len) {
@@ -450,16 +441,15 @@ static noinline int nm_send_payload(struct nm_payload *payload) {
 
 /* --- module walk helpers --- */
 
-static const char *const nm_partitions[] = {
-    "vendor", "system_ext", "product", "odm", "apex",
-    "oem", "optics", "prism", "mi_ext", NULL,
-};
-
 static int nm_is_partition(const char *p, size_t len) {
-    for (int i = 0; nm_partitions[i]; i++) {
-        if (strlen(nm_partitions[i]) == len && !memcmp(p, nm_partitions[i], len)) return 1;
+    if (len > 3 && !memcmp(p, "my_", 3)) return 1;
+    static const char list[] = "vendor\0system_ext\0product\0odm\0apex\0oem\0optics\0prism\0mi_ext\0";
+    for (const char *s = list; *s; ) {
+        size_t n = strlen(s);
+        if (n == len && !memcmp(p, s, len)) return 1;
+        s += n + 1;
     }
-    return len > 3 && !memcmp(p, "my_", 3);
+    return 0;
 }
 
 static const char *nm_vpath(const struct nm_walk *ctx) {
@@ -809,8 +799,11 @@ static int cmd_module_list(struct nm_workspace *ws, struct nm_args *args) {
         char mod_path[PATH_MAX], prop_path[PATH_MAX], name[256];
         struct nm_walk ctx = { .catalog = ws->payload.data_size ? &cat : NULL };
         if ((rc = nm_path_join(mod_path, sizeof(mod_path), modules_dir, mod_id))) break;
-        if ((rc = nm_dir_exists(mod_path)) < 0) break;
-        if (!rc) continue;
+        if (e->d_type != DT_DIR) {
+            if (e->d_type != DT_UNKNOWN && e->d_type != DT_LNK) continue;
+            if ((rc = nm_dir_exists(mod_path)) < 0) break;
+            if (!rc) continue;
+        }
         if ((rc = nm_path_join(prop_path, sizeof(prop_path), mod_path, "module.prop"))) break;
         rc = nm_read_module_name(prop_path, name, sizeof(name));
         if (rc == -ENOENT) { rc = 0; continue; }

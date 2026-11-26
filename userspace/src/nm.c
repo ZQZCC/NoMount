@@ -177,7 +177,7 @@ int main(int argc, char **argv) {
                 if (exit_code || payload->data_size == 0) break;
 
                 char *data = payload->buffer;
-                int pos = 0;
+                unsigned int pos = 0;
                 while (pos < payload->data_size) {
                     if (is_uids) {
                         unsigned int uid = *(unsigned int *)(data + pos);
@@ -252,37 +252,12 @@ int main(int argc, char **argv) {
         case ACTION_NONE:
         default: {
             print_literal(
-                "NoMount CLI (nm) - Usage Guide:\n\n"
-                "Rule Commands:\n"
-                "  nm rule add <virtual_path> <real_path>  Add a path redirection\n"
-                "  nm rule add --whiteout <virtual_path>   Hide/whiteout a path\n"
-                "  nm rule add --opaque <virtual_dir> <real_dir>\n"
-                "                                          Add an opaque dir redirect\n"
-                "  nm rule add [--uid <u> | --uid-range <a>-<b> | --uid-range all]\n"
-                "              [--uid-excluded <c>-<d>] <vpath> <rpath>\n"
-                "                                          Scope the rule to a UID set\n"
-                "                                          (default: applies to all UIDs)\n"
-                "  nm rule del <virtual_path>              Delete a specific rule\n"
-                "  nm rule del [same UID options] <vpath>  Delete a rule matching the UID scope\n"
-                "  nm rule list [--json]                   List all active rules\n"
-                "  nm rule clear                           Clear all rules\n\n"
-                "Module Commands:\n"
-                "  nm module load <mod_path> [--targets=\"system vendor ...\"]\n"
-                "                                          Inject every partition of a module\n"
-                "                                          (default: all known partitions)\n"
-                "  nm module unload <mod_path> [same --targets]\n"
-                "                                          Remove all rules belonging to a module\n"
-                "  nm module list [--json] [--only=<a,b,...>]\n"
-                "                                          List modules with their injected file count\n\n"
-                "UID Commands (Exceptions):\n"
-                "  nm uid add <uid>                        Add app UID to exception list\n"
-                "  nm uid del <uid>                        Remove app UID from exceptions\n"
-                "  nm uid list                             List all UID exceptions\n"
-                "  nm uid clear                            Clear all UID exceptions\n"
-                "  nm uid block_isolated [on/1 | off/0]    Toggle isolated process blocking\n\n"
-                "General Commands:\n"
-                "  nm clear all                            Clear all rules and UIDs\n"
-                "  nm version, v, -v                       Show driver version\n"
+                "usage: nm <cmd>\n"
+                "  rule add [--whiteout|--opaque] [--uid u|--uid-range a-b|all] [--uid-excluded c-d] <vpath> [rpath]\n"
+                "  rule del [same uid opts] <vpath> | rule list [--json] | rule clear\n"
+                "  module load|unload <dir> [--targets=...] | module list [--json] [--only=...]\n"
+                "  uid add|del <uid>... | uid list | uid clear | uid block_isolated [on|off]\n"
+                "  clear [all|rules|uid] | version\n"
             );
             break;
         }

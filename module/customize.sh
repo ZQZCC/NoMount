@@ -7,10 +7,6 @@ ui_print " "
 
 ui_print "- Device Architecture: $ARCH"
 
-# KernelSU reports x86_64 devices as "x64", Magisk as "x86_64"
-ARCH_BIN="$ARCH"
-[ "$ARCH_BIN" = "x64" ] && ARCH_BIN="x86_64"
-
 # Check root implementation
 if [ "$KSU" = "true" ] || command -v ksud >/dev/null 2>&1 || [ -x /data/adb/ksu/bin/ksud ]; then
   ROOT_IMP=ksu
@@ -22,37 +18,25 @@ else
   abort "! Unsupported root env"
 fi
 
-if [ ! -f "$MODPATH/bin/nm-$ARCH_BIN" ]; then
+if [ ! -f "$MODPATH/bin/nm-$ARCH" ]; then
   abort "! Unsupported architecture: $ARCH"
 fi
-mv "$MODPATH/bin/nm-$ARCH_BIN" "$MODPATH/bin/nm"
+mv "$MODPATH/bin/nm-$ARCH" "$MODPATH/bin/nm"
 set_perm "$MODPATH/bin/nm" 0 0 0755
 
-mv "$MODPATH/bin/lkmloader-$ARCH_BIN" "$MODPATH/lkm/lkmloader"
+mv "$MODPATH/bin/lkmloader-$ARCH" "$MODPATH/lkm/lkmloader"
 set_perm "$MODPATH/lkm/lkmloader" 0 0 0755
 rm -rf "$MODPATH"/bin/nm-* "$MODPATH"/bin/lkmloader-*
 
+MODDIR="$MODPATH"
+. "$MODDIR/common.sh"
+
 try_load_ko() {
   local output
-  local root_cmd=""
 
-  if command -v ksud >/dev/null 2>&1 && ksud -h 2>&1 | grep -qE '(^|[[:space:]])insmod([[:space:]]|$)'; then
-    root_cmd="ksud"
-  elif command -v apd >/dev/null 2>&1 && apd -h 2>&1 | grep -qE '(^|[[:space:]])insmod([[:space:]]|$)'; then
-    root_cmd="apd"
-  fi
-
-  if [ -n "$root_cmd" ]; then
-    if output=$("$root_cmd" insmod "$1" 2>&1) && "$MODPATH/bin/nm" version >/dev/null 2>&1; then
-      return 0
-    fi
-    if echo "$output" | grep -qi "File exists"; then
-      return 0
-    fi
-    ui_print "  [!] $root_cmd insmod failed: $output"
-  fi
-
-  if output=$("$MODPATH/lkm/lkmloader" "$1" 2>&1) && "$MODPATH/bin/nm" version >/dev/null 2>&1; then
+  if output=$({
+    [ -n "$ROOT_INSMOD" ] && "$ROOT_INSMOD" insmod "$1" || "$MODPATH/lkm/lkmloader" "$1"
+  } 2>&1) && "$MODPATH/bin/nm" version >/dev/null 2>&1; then
     return 0
   fi
 
@@ -60,13 +44,13 @@ try_load_ko() {
     return 0
   fi
 
-  ui_print "  [!] lkmloader failed: $output"
+  ui_print "  $output"
   return 1
 }
 
 load_ko_for_kernel() {
-  local kver="$1" akver="$2" arch_sfx="$3"
-  local exact="$MODPATH/lkm/nomount-${akver}-${kver}${arch_sfx}.ko"
+  local kver="$1" akver="$2"
+  local exact="$MODPATH/lkm/nomount-${akver}-${kver}.ko"
   local mod
   local found=0
 
@@ -79,7 +63,7 @@ load_ko_for_kernel() {
     fi
   fi
 
-  for mod in "$MODPATH"/lkm/nomount*-${kver}${arch_sfx}.ko; do
+  for mod in "$MODPATH"/lkm/nomount*-${kver}.ko; do
     [ -f "$mod" ] || continue
     [ "$mod" = "$exact" ] && continue
     found=1
@@ -97,8 +81,6 @@ load_ko_for_kernel() {
 OLD_MODPATH="/data/adb/modules/nomount"
 KVER=$(uname -r | cut -d'.' -f1,2)
 AKVER=$(uname -r | grep -oE 'android[0-9]+')
-ARCH_SFX=""
-[ "$ARCH_BIN" = "x86_64" ] && ARCH_SFX="-x86_64"
 
 if [ -n "$AKVER" ]; then
   ui_print "- Detected Kernel: $KVER ($AKVER branch)"
@@ -127,6 +109,8 @@ if [ "$API_RESPONDS" = true ]; then
   fi
 fi
 
+[ "$BUILTIN" = true ] || ROOT_INSMOD=$(find_root_insmod)
+
 if [ "$BUILTIN" = true ]; then
   ui_print "  [OK] NoMount is built into the kernel."
   rm -rf "$MODPATH/lkm"
@@ -135,7 +119,7 @@ elif [ "$LKM_RUNNING" = true ]; then
   ui_print "  [*] Active LKM detected."
   ui_print "  [*] Verifying new driver (no unload)..."
 
-  load_ko_for_kernel "$KVER" "$AKVER" "$ARCH_SFX"
+  load_ko_for_kernel "$KVER" "$AKVER"
   KO_RC=$?
 
   if [ "$KO_RC" = 0 ]; then
@@ -157,7 +141,7 @@ elif [ "$LKM_RUNNING" = true ]; then
 else
   ui_print "  [*] Built-in support not found. Attempting LKM injection..."
 
-  if load_ko_for_kernel "$KVER" "$AKVER" "$ARCH_SFX"; then
+  if load_ko_for_kernel "$KVER" "$AKVER"; then
     LOADED_FRESH=true
   fi
 
@@ -190,7 +174,7 @@ else
 fi
 
 NM_REQUIRED_VER=22
-NM_CURRENT_VER=$("$MODPATH/bin/nm" version 2>/dev/null | head -1 | grep -oE '^[0-9]+' | head -1)
+NM_CURRENT_VER=$("$MODPATH/bin/nm" version 2>/dev/null | sed -n '1s/^\([0-9][0-9]*\).*/\1/p;1q')
 NM_CURRENT_VER=${NM_CURRENT_VER:-0}
 
 if [ "$NM_CURRENT_VER" -lt "$NM_REQUIRED_VER" ]; then
@@ -240,7 +224,6 @@ else
   ui_print "  [OK] System is ready for injection."
 fi
 
-NOMOUNT_DATA="/data/adb/nomount"
 mkdir -p "$NOMOUNT_DATA"
 rm -f "$NOMOUNT_DATA/.booting" "$NOMOUNT_DATA/disable"
 

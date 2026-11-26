@@ -25,8 +25,17 @@ if ! _lock_acquire "$NOMOUNT_DATA/.inject.flock" 120; then
 fi
 trap 'exit 1' INT TERM
 
+if [ -f "$NOMOUNT_DATA/.block_isolated_uids" ]; then
+    "$LOADER" uid block_isolated on >/dev/null 2>&1 || klogerr "failed to enable isolated UID blocking"
+fi
+if [ -f "$NOMOUNT_DATA/.exclusion_list.json" ]; then
+    uids=$(grep -o '"uid":"[0-9]*"' "$NOMOUNT_DATA/.exclusion_list.json" | cut -d'"' -f4)
+    if [ -n "$uids" ]; then
+        "$LOADER" uid add $uids >/dev/null 2>&1 || klogerr "failed to apply excluded UIDs"
+    fi
+fi
+
 klog "Injection started"
-set -o pipefail
 status=0
 
 for mod_path in "$MODULES_DIR"/*; do

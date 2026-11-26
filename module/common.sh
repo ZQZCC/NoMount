@@ -4,9 +4,8 @@
 NOMOUNT_DATA="/data/adb/nomount"
 LOADER="$MODDIR/bin/nm"
 BOOT_SEMAPHORE="$NOMOUNT_DATA/.booting"
-DUMP_RULES_FLAG="$NOMOUNT_DATA/dump_rules"
 PROP_FILE="$MODDIR/module.prop"
-BASE_DESC="A metamodule that replaces OverlayFS/MagicMount with VFS path redirection."
+BASE_DESC="基于 VFS 重定向的元模块"
 
 klog()      { echo "<6>nomount: $*" > /dev/kmsg; }
 klogwarn()  { echo "<4>nomount: $*" > /dev/kmsg; }
@@ -25,10 +24,19 @@ disable_module() {
     rm -f "$BOOT_SEMAPHORE"
 }
 
+find_root_insmod() {
+    local cmd
+    for cmd in ksud apd; do
+        if command -v "$cmd" >/dev/null 2>&1 && "$cmd" -h 2>&1 | grep -qE '(^|[[:space:]])insmod([[:space:]]|$)'; then
+            echo "$cmd"
+            return
+        fi
+    done
+}
+
 load_ko() {
-    local root_cmd=""
-    if command -v ksud >/dev/null 2>&1 && ksud -h 2>&1 | grep -qE '(^|[[:space:]])insmod([[:space:]]|$)'; then root_cmd="ksud"
-    elif command -v apd >/dev/null 2>&1 && apd -h 2>&1 | grep -qE '(^|[[:space:]])insmod([[:space:]]|$)'; then root_cmd="apd"; fi
+    local root_cmd
+    root_cmd=$(find_root_insmod)
 
     if [ -n "$root_cmd" ]; then
         if try "$root_cmd" insmod "$1" && "$LOADER" version >/dev/null 2>&1; then
@@ -70,7 +78,7 @@ bootloop_check() {
         return 1
     fi
 
-    local current prev
+    local current prev="MISSING"
     current=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
     if [ -z "$current" ]; then
         current=$(grep '^btime ' /proc/stat 2>/dev/null | cut -d' ' -f2)
@@ -78,7 +86,7 @@ bootloop_check() {
     fi
 
     if [ -f "$BOOT_SEMAPHORE" ] && [ -s "$BOOT_SEMAPHORE" ]; then
-        prev=$(cat "$BOOT_SEMAPHORE" 2>/dev/null || echo "MISSING")
+        IFS= read -r prev 2>/dev/null < "$BOOT_SEMAPHORE"
         if [ "$prev" != "$current" ]; then
             klogerr "Bootloop detected (prev=$prev current=$current)"
             disable_module "🚨 Bootloop Prevented"
@@ -114,30 +122,4 @@ ensure_lkm_loaded() {
     klog "LKM loaded and initialized correctly."
     _lock_release
     return 0
-}
-
-dump_all_rules_logcat() {
-    log -t nomount -p i "rules dump started (triggered $*)"
-
-    if ! "$LOADER" version >/dev/null 2>&1; then
-        log -t nomount -p e "rules dump aborted: driver unavailable"
-        return 1
-    fi
-
-    "$LOADER" rule list 2>/dev/null | {
-        buf=""
-        n=0
-        while IFS= read -r line; do
-            [ -n "$line" ] || continue
-            if [ -n "$buf" ] && [ $(( ${#buf} + ${#line} + 3 )) -gt 900 ]; then
-                log -t nomount -p i "$buf"
-                buf="$line"
-            else
-                buf="${buf:+$buf ; }$line"
-            fi
-            n=$((n + 1))
-        done
-        [ -n "$buf" ] && log -t nomount -p i "$buf"
-        log -t nomount -p i "rules dump end (total $n rules)"
-    }
 }

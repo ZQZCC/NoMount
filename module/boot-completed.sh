@@ -7,8 +7,4 @@ if [ -f "$BOOT_SEMAPHORE" ]; then
     klog "boot completed safely."
 fi
 
-if [ -f "$DUMP_RULES_FLAG" ]; then
-    dump_all_rules_logcat "on boot" || true
-fi
-
 exit 0

@@ -2,7 +2,7 @@
 set -eu
 
 GKI_ROOT=$(pwd)
-REPO_URL="https://github.com/maxsteeel/nomount"
+REPO_URL="https://github.com/ZQZCC/NoMount"
 REPO_DIR="$GKI_ROOT/NoMount"
 
 display_usage() {
@@ -10,7 +10,7 @@ display_usage() {
     echo "  --cleanup:             Cleans up previous modifications made by the script (doesn't revert in-kernel patches)."
     echo "  <commit-or-tag>:       Sets up or updates NoMount to specified tag or commit."
     echo "  -h, --help:            Displays this usage information."
-    echo "  (no args):             Sets up or updates NoMount environment to the latest tagged version."
+    echo "  (no args):             Sets up or updates NoMount from the my branch."
 }
 
 initialize_variables() {
@@ -62,19 +62,14 @@ setup_nomount() {
     fi
 
     cd "$REPO_DIR"
+    git remote set-url origin "$REPO_URL"
 
     git reset --hard HEAD --quiet
     git fetch --all --tags --quiet
     if [ -z "${1-}" ]; then
-        latest_tag=$(git tag --list 'v*' --sort=-v:refname | head -n 1)
-        if [ -n "$latest_tag" ]; then
-            git checkout "$latest_tag" --quiet
-            echo "[-] Checked out latest tag: $latest_tag"
-        else
-            git checkout dev --quiet 2>/dev/null || git checkout master --quiet 2>/dev/null
-            git pull --quiet
-            echo "[-] No version tags found; checked out and updated default branch."
-        fi
+        git checkout my --quiet
+        git pull --quiet
+        echo "[-] Checked out and updated my."
     else
         git checkout "$1" --quiet
         echo "[-] Checked out specific target: $1"
