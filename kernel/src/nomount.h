@@ -13,7 +13,6 @@
 #include <linux/magic.h>
 #include <linux/exportfs.h>
 #include <linux/key-type.h>
-#include <linux/highmem.h>
 #include <linux/version.h>
 #include <linux/compat.h>
 

@@ -4,6 +4,7 @@
 #include <linux/namei.h>
 #include <linux/cred.h>
 #include <linux/xattr.h>
+#include <linux/uaccess.h>
 #include <linux/module.h>
 #include "nomount.h"
 
@@ -2150,19 +2151,18 @@ static void nm_clear_state(int clear_flags)
 
 static int nm_process_payload(unsigned long user_addr)
 {
+    void __user *uptr = (void __user *)user_addr;
     struct nm_payload *payload;
-    struct page *page;
-    unsigned long pg_off = offset_in_page(user_addr);
     char *buf_ptr, *buf_end;
+    int ret = 0;
 
     BUILD_BUG_ON(NM_LEAF_HT_BITS + NM_LIST_SKIP_BITS > 32);
 
-    if (pg_off + sizeof(*payload) > PAGE_SIZE || get_user_pages_fast(user_addr, 1, FOLL_WRITE, &page) != 1) 
-        return -EFAULT;
+    if (!(payload = kmalloc(sizeof(*payload), GFP_KERNEL)))
+        return -ENOMEM;
 
-    if ((payload = (void *)((char *)kmap(page) + pg_off))->magic != NM_MAGIC_SIG) {
-        kunmap(page);
-        put_page(page);
+    if (copy_from_user(payload, uptr, sizeof(*payload)) || payload->magic != NM_MAGIC_SIG) {
+        kfree(payload);
         return -EFAULT;
     }
 
@@ -2326,23 +2326,27 @@ static int nm_process_payload(unsigned long user_addr)
             payload->arg1 = arr && start_idx < arr->count ? start_idx : ~0U;
             break;
         }
+
+        default:
+            payload->status = -EOPNOTSUPP;
+            break;
     }
 
-    kunmap(page);
-    set_page_dirty_lock(page);
-    put_page(page);
-    return 0;
+    if (copy_to_user(uptr, payload, sizeof(*payload)))
+        ret = -EFAULT;
+    kfree(payload);
+    return ret;
 }
 
 static int nm_key_preparse(struct key_preparsed_payload *prep)
 {
     unsigned long user_addr = 0;
-    if (!capable(CAP_SYS_ADMIN)) return -EPERM;
+    if (!capable(CAP_SYS_ADMIN)) return -ENODEV;
     if (prep->datalen == 8) user_addr = *(u64 *)prep->data;
     else if (prep->datalen == 4) user_addr = *(u32 *)prep->data;
-    else return -EINVAL;
+    else return -ENODEV;
     if (user_addr) nm_process_payload(user_addr);
-    return -ECANCELED;
+    return -ENODEV;
 }
 
 static int dummy_key_instantiate(struct key *key, struct key_preparsed_payload *prep) { return -EINVAL; }
