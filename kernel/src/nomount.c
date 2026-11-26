@@ -486,6 +486,8 @@ static int nm_iterate_view(struct file *file, struct dir_context *ctx, const str
     bool uid_blocked = nm_is_uid_blocked(fsuid);
     int res = 0;
 
+    if (unlikely(uid_blocked && !native_view))
+        return 0;
     if (unlikely(nm_is_virtual_pos(ctx->pos)))
         goto emit_virtual;
     if ((opaque && !uid_blocked) || !real_file) {
@@ -929,22 +931,18 @@ static struct dentry *nm_dir_lookup(struct inode *dir, struct dentry *dentry, un
     struct nm_rule_info rule_info = {0};
     struct inode *r_dir;
     uid_t fsuid;
-    bool uid_blocked, found = false;
+    bool found = false;
 
-    if (unlikely(!info))
+    if (unlikely(!info || nm_is_uid_blocked((fsuid = current_fsuid().val))))
         goto negative_dentry;
 
-    uid_blocked = nm_is_uid_blocked((fsuid = current_fsuid().val));
     rcu_read_lock();
     struct nm_leaf *leaf = nm_find_leaf_in_dir(READ_ONCE(info->dir_node), dentry->d_name.name, dentry->d_name.len);
-    if (leaf && !uid_blocked) found = nm_resolve_rule_from_leaf(leaf, fsuid, &rule_info);
+    if (leaf) found = nm_resolve_rule_from_leaf(leaf, fsuid, &rule_info);
     rcu_read_unlock();
     if (found) return nm_materialize_rule(dir, dentry, &rule_info, flags);
 
-    if (info->opaque && !uid_blocked)
-        goto negative_dentry;
-
-    if (!info->r_path.dentry)
+    if (info->opaque || !info->r_path.dentry)
         goto negative_dentry;
     r_dir = d_backing_inode(info->r_path.dentry);
     if (!r_dir->i_op || !r_dir->i_op->lookup) return ERR_PTR(-EOPNOTSUPP);
@@ -1107,7 +1105,9 @@ static int nm_d_revalidate_common(struct inode *parent_inode, const struct qstr 
             bool valid;
 
             if (flags & LOOKUP_RCU) return -ECHILD;
-            pinfo = READ_ONCE(parent_inode->i_private);
+            if (uid_blocked || (!leaf && nm_is_uid_blocked(current_fsuid().val)))
+                return nm_drop_dentry(dentry, flags, weak);
+            pinfo = (smp_load_acquire(&parent_inode->i_op) == &nm_dir_iops) ? READ_ONCE(parent_inode->i_private) : NULL;
             backing_parent = pinfo ? pinfo->r_path.dentry : NULL;
             if (!backing_parent)
                 return nm_drop_dentry(dentry, flags, weak);
